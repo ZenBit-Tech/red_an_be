@@ -5,12 +5,14 @@ import AppController from './app.controller';
 import AppService from './app.service';
 import ExampleUserModule from './modules/example-user/example.user.module';
 import { dataSourceOptions } from './common/db/datasource';
+import MailModule from './modules/mail/mail.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     TypeOrmModule.forRoot(dataSourceOptions),
     ExampleUserModule,
+    MailModule,
   ],
   controllers: [AppController],
   providers: [AppService],
