@@ -110,14 +110,14 @@ export default class UserController {
   async sendTestEmail(@Body() body: SendTestEmailDto): Promise<{ message: string }> {
     if (body.template === MAIL_TEMPLATES.CONTACT_LEAD) {
       await this.mailService.sendContactLead({
-        firstName: 'Test',
-        lastName: 'User',
-        company: 'Test Company',
+        firstName: body.firstName ?? '',
+        lastName: body.lastName ?? '',
+        company: body.company ?? '',
         email: body.email,
-        message: body.token,
+        message: body.message ?? '',
       });
     } else {
-      await this.mailService.sendMagicLink(body.email, body.token);
+      await this.mailService.sendMagicLink(body.email, body.token ?? '');
     }
 
     return { message: MAIL_TEST_MESSAGES.SENT };

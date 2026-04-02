@@ -43,6 +43,10 @@ describe('UserController', () => {
         email: 'target@example.com',
         template: MAIL_TEMPLATES.MAGIC_LINK,
         token: 'sample-token',
+        firstName: undefined,
+        lastName: undefined,
+        company: undefined,
+        message: undefined,
       });
 
       expect(mailServiceMock.sendMagicLink).toHaveBeenCalledWith(
@@ -57,15 +61,18 @@ describe('UserController', () => {
       const response = await controller.sendTestEmail({
         email: 'lead@example.com',
         template: MAIL_TEMPLATES.CONTACT_LEAD,
-        token: 'lead-token',
+        firstName: 'John',
+        lastName: 'Doe',
+        company: 'Nemo',
+        message: 'Just my two cents on your service...',
       });
 
       expect(mailServiceMock.sendContactLead).toHaveBeenCalledWith({
-        firstName: 'Test',
-        lastName: 'User',
-        company: 'Test Company',
+        firstName: 'John',
+        lastName: 'Doe',
+        company: 'Nemo',
         email: 'lead@example.com',
-        message: 'lead-token',
+        message: 'Just my two cents on your service...',
       });
       expect(mailServiceMock.sendMagicLink).not.toHaveBeenCalled();
       expect(response).toEqual({ message: MAIL_TEST_MESSAGES.SENT });
