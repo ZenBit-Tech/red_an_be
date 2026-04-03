@@ -2,8 +2,6 @@ import {
   Body,
   Controller,
   Get,
-  HttpCode,
-  HttpStatus,
   Post,
   Param,
   ParseUUIDPipe,
@@ -23,17 +21,12 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import UserService from './example.user.service';
-import MailService from '../mail/mail.service';
 import CreateUserDto from './dto/createExampleUser.dto';
 import ReturnUserDto from './dto/returnExampleUser.dto';
-import SendTestEmailDto from './dto/sendTestEmail.dto';
-import { MAIL_TEMPLATES } from '../mail/mail.constants';
 import {
   EXAMPLE_USER_ROUTE,
   EXAMPLE_USER_TAG,
   EXAMPLE_USER_MESSAGES,
-  MAIL_TEST_ROUTE,
-  MAIL_TEST_MESSAGES,
 } from './example.user.constants';
 
 type DbHealthResponse = {
@@ -45,10 +38,7 @@ type DbHealthResponse = {
 @UseInterceptors(ClassSerializerInterceptor)
 @Controller(EXAMPLE_USER_ROUTE)
 export default class UserController {
-  constructor(
-    private readonly userService: UserService,
-    private readonly mailService: MailService,
-  ) {}
+  constructor(private readonly userService: UserService) {}
 
   @ApiOperation({ summary: 'Create a new template user' })
   @ApiCreatedResponse({
@@ -99,27 +89,5 @@ export default class UserController {
   @Get('health/db')
   async checkDbConnection(): Promise<DbHealthResponse> {
     return this.userService.checkDbConnection();
-  }
-
-  @ApiOperation({ summary: 'Send a test email to verify mail service configuration' })
-  @ApiOkResponse({ description: MAIL_TEST_MESSAGES.SENT })
-  @ApiBadRequestResponse({ description: 'Validation failed for request payload' })
-  @ApiInternalServerErrorResponse({ description: 'Failed to send test email' })
-  @HttpCode(HttpStatus.OK)
-  @Post(MAIL_TEST_ROUTE)
-  async sendTestEmail(@Body() body: SendTestEmailDto): Promise<{ message: string }> {
-    if (body.template === MAIL_TEMPLATES.CONTACT_LEAD) {
-      await this.mailService.sendContactLead({
-        firstName: body.firstName ?? '',
-        lastName: body.lastName ?? '',
-        company: body.company ?? '',
-        email: body.email,
-        message: body.message ?? '',
-      });
-    } else {
-      await this.mailService.sendMagicLink(body.email, body.token ?? '');
-    }
-
-    return { message: MAIL_TEST_MESSAGES.SENT };
   }
 }

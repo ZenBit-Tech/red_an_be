@@ -28,9 +28,3 @@ export const EXAMPLE_USER_MESSAGES = {
 export const MYSQL_ERROR_CODES = {
   DUPLICATE_ENTRY: 'ER_DUP_ENTRY',
 };
-
-export const MAIL_TEST_ROUTE = 'mail/test';
-
-export const MAIL_TEST_MESSAGES = {
-  SENT: 'Test email sent successfully',
-};
