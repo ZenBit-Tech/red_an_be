@@ -91,7 +91,7 @@ export default class MailService {
 
     await this.sendEmailWithTemplate({
       to: salesEmail,
-      subject: `${MAIL_SUBJECTS.CONTACT_LEAD_PREFIX}: ${clientData.company}`,
+      subject: MAIL_SUBJECTS.CONTACT_LEAD_PREFIX,
       templateName: MAIL_TEMPLATES.CONTACT_LEAD,
       context: clientData,
     });

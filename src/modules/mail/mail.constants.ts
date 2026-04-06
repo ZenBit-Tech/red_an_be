@@ -18,7 +18,6 @@ export const MAGIC_LINK_PATH = '/auth/verify?token=';
 export interface ContactLeadData {
   firstName: string;
   lastName: string;
-  company: string;
   email: string;
   message: string;
 }
