@@ -30,14 +30,21 @@ src/
 ├── migrations/
 │   └── <timestamp>-Init.ts           # Generated migrations go here
 ├── modules/
-│   └── example-user/                 # ← Use this as a module template
-│       ├── dto/
-│       │   ├── createExampleUser.dto.ts
-│       │   └── returnExampleUser.dto.ts
-│       ├── example.user.constants.ts
-│       ├── example.user.controller.ts
-│       ├── example.user.module.ts
-│       └── example.user.service.ts
+│   ├── example-user/                 # ← Use this as a module template
+│   │   ├── dto/
+│   │   │   ├── createExampleUser.dto.ts
+│   │   │   └── returnExampleUser.dto.ts
+│   │   ├── example.user.constants.ts
+│   │   ├── example.user.controller.ts
+│   │   ├── example.user.module.ts
+│   │   └── example.user.service.ts
+│   └── mail/
+│       ├── mail.constants.ts
+│       ├── mail.module.ts
+│       └── mail.service.ts
+├── templates/
+│   ├── contact-lead.html
+│   └── magic-link-email.html
 ├── app.controller.ts
 ├── app.module.ts
 ├── app.service.ts
@@ -206,13 +213,4 @@ npm run test:e2e
 
 ---
 
-## Creating a New Module
-
-Follow the `example-user` pattern:
-
-1. Create folder: `src/modules/<your-module>/`
-2. Add `dto/`, `*.entity.ts` in `common/db/entities/`
-3. Create `*.module.ts`, `*.controller.ts`, `*.service.ts`
-4. Register entity in `datasource.ts` → `entities: [...]`
-5. Import your module in `app.module.ts`
-6. Generate a migration: `npm run migration:generate src/migrations/<name>`
+Development workflow guides are in [CONTRIBUTING.md](./CONTRIBUTING.md).
