@@ -19,5 +19,6 @@ export interface ContactLeadData {
   firstName: string;
   lastName: string;
   email: string;
+  phone?: string;
   message: string;
 }
