@@ -1,0 +1,47 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: clinical-curator-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-${DB_PASSWORD}}
+      MYSQL_DATABASE: ${DB_NAME}
+      MYSQL_USER: ${DB_USERNAME}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - '3307:3306'
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ['CMD', 'mysqladmin', 'ping', '-h', 'localhost']
+      interval: 10s
+      timeout: 20s
+      retries: 10
+    networks:
+      - clinical-curator-network
+
+  presidio-analyzer:
+    image: mcr.microsoft.com/presidio-analyzer:latest
+    container_name: clinical-curator-presidio-analyzer
+    restart: unless-stopped
+    ports:
+      - '5001:3000'
+    networks:
+      - clinical-curator-network
+
+  presidio-anonymizer:
+    image: mcr.microsoft.com/presidio-anonymizer:latest
+    container_name: clinical-curator-presidio-anonymizer
+    restart: unless-stopped
+    ports:
+      - '5002:3000'
+    networks:
+      - clinical-curator-network
+
+volumes:
+  mysql_data:
+    driver: local
+
+networks:
+  clinical-curator-network:
+    driver: bridge
