@@ -4,7 +4,7 @@
 
 ## Issue ticket code (and/or) and link
 
-- [Link to TRELLO ticket](#https://ticket-url)
+- [Link to JIRA ticket](#https://ticket-url)
 
 ### **General**
 

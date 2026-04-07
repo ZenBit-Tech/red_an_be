@@ -88,8 +88,9 @@ NODE_ENV=development
 DB_TYPE=mysql
 DB_HOST=localhost
 DB_PORT=3306
-DB_USERNAME=root
+DB_USERNAME=app_user
 DB_PASSWORD=your_password
+DB_ROOT_PASSWORD=your_root_password
 DB_NAME=red_an_be_db
 ```
 
@@ -107,6 +108,35 @@ npm run start:dev
 
 # production
 npm run start:prod
+```
+
+### Docker Compose (production profile)
+
+Use the dedicated production compose file so MySQL and Presidio services are not exposed via host ports.
+
+```bash
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+Stop services:
+
+```bash
+docker compose -f docker-compose.prod.yml down
+```
+
+### Docker Compose (development infra only)
+
+Run only infrastructure services (MySQL + Presidio) and keep NestJS running locally with watch mode.
+
+```bash
+docker compose -f docker-compose.dev.yml up -d
+npm run start:dev
+```
+
+Stop infrastructure:
+
+```bash
+docker compose -f docker-compose.dev.yml down
 ```
 
 ### 5. Open Swagger UI
