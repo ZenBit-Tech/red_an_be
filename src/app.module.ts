@@ -6,7 +6,6 @@ import AppService from './app.service';
 import ExampleUserModule from './modules/example-user/example.user.module';
 import { dataSourceOptions } from './common/db/datasource';
 import MailModule from './modules/mail/mail.module';
-import { ContactFormModule } from './modules/contactForm/contactForm.module';
 
 @Module({
   imports: [
@@ -14,7 +13,6 @@ import { ContactFormModule } from './modules/contactForm/contactForm.module';
     TypeOrmModule.forRoot(dataSourceOptions),
     ExampleUserModule,
     MailModule,
-    ContactFormModule,
   ],
   controllers: [AppController],
   providers: [AppService],
