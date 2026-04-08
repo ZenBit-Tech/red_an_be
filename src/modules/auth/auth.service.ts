@@ -3,9 +3,9 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
 import * as crypto from 'crypto';
-import TemplateUser from '../../common/db/entities/example.user.entity';
-import MagicLinkRequestDto from './dto/magic-link-request.dto';
-import MailService from '../mail/mail.service';
+import TemplateUser from '@/common/db/entities/user.entity';
+import MagicLinkRequestDto from '@/modules/auth/dto/magic-link-request.dto';
+import MailService from '@/modules/mail/mail.service';
 
 @Injectable()
 export default class AuthService {

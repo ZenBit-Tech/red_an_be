@@ -1,9 +1,10 @@
 import { Controller, Post, Body, Get, Query, HttpCode, HttpStatus } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { plainToInstance } from 'class-transformer';
-import AuthService from './auth.service';
-import MagicLinkRequestDto from './dto/magic-link-request.dto';
-import { AuthResponseDto } from './dto/auth-response.dto';
+// eslint-disable-next-line import/no-named-as-default
+import AuthService from '@/modules/auth/auth.service';
+import MagicLinkRequestDto from '@/modules/auth/dto/magic-link-request.dto';
+import { AuthResponseDto } from '@/modules/auth/dto/auth-response.dto';
 
 @ApiTags('Auth')
 @Controller('auth')

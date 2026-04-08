@@ -1,11 +1,11 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { JwtModule } from '@nestjs/jwt';
-import AuthController from './auth.controller';
-import { AUTH_CONSTANTS } from './auth.constants';
-import MailModule from '../mail/mail.module';
-import TemplateUser from '../../common/db/entities/example.user.entity';
-import AuthService from './auth.service';
+import { AUTH_CONSTANTS } from '@common/constants';
+import AuthController from '@/modules/auth/auth.controller';
+import MailModule from '@/modules/mail/mail.module';
+import TemplateUser from '@/common/db/entities/user.entity';
+import AuthService from '@/modules/auth/auth.service';
 
 @Module({
   imports: [

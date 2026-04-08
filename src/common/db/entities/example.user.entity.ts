@@ -12,7 +12,4 @@ export default class TemplateUser {
 
   @Column({ length: EXAMPLE_USER_LIMITS.EMAIL_MAX_LENGTH, unique: true, nullable: false })
   email: string;
-
-  @Column({ type: 'varchar', nullable: true })
-  magicLinkToken?: string | null;
 }
