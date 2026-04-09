@@ -3,8 +3,7 @@ import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { plainToInstance } from 'class-transformer';
 // eslint-disable-next-line import/no-named-as-default
 import AuthService from '@/modules/auth/auth.service';
-import MagicLinkRequestDto from '@/modules/auth/dto/magic-link-request.dto';
-import { AuthResponseDto } from '@/modules/auth/dto/auth-response.dto';
+import { MagicLinkRequestDto, AuthResponseDto } from '@/modules/auth/dto/auth.dto';
 
 @ApiTags('Auth')
 @Controller('auth')
