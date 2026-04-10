@@ -1,6 +1,6 @@
-import { IsString, IsEmail, IsOptional, IsNotEmpty } from 'class-validator';
+import { IsString, IsEmail, IsOptional, IsNotEmpty, MaxLength } from 'class-validator';
 
-export class SubmitFormDto {
+export class SubmitContactFormDto {
   @IsString()
   @IsNotEmpty()
   firstName!: string;
@@ -18,5 +18,6 @@ export class SubmitFormDto {
 
   @IsString()
   @IsNotEmpty()
+  @MaxLength(1000)
   message!: string;
 }

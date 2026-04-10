@@ -22,9 +22,8 @@ async function bootstrap() {
 
   const configService = new ConfigService();
 
-  // Enable CORS for the frontend URL specified in the environment variables, or default to localhost:5173
   app.enableCors({
-    origin: configService.get<string>('FRONTEND_URL') ?? 'http://localhost:5173',
+    origin: configService.get<string>('FRONTEND_URL'),
     credentials: true,
   });
 
