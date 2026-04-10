@@ -149,6 +149,9 @@ const GDPR_EU_STRATEGY: ComplianceStrategy = {
   adHocRecognizers: GDPR_EU_CUSTOM_RECOGNIZERS,
 };
 
+// GDPR_UK intentionally extends the EU baseline but is not identical:
+// it adds UK-specific identifiers and additional special-category entities.
+// Keeping a dedicated constant makes framework-specific behavior explicit.
 const GDPR_UK_STRATEGY: ComplianceStrategy = {
   mode: 'flexible',
   entities: {
@@ -172,6 +175,8 @@ const GDPR_UK_STRATEGY: ComplianceStrategy = {
   adHocRecognizers: [...GDPR_EU_CUSTOM_RECOGNIZERS, ...GDPR_UK_CUSTOM_RECOGNIZERS],
 };
 
+// Two separate keys are required here because analyzable entity sets and
+// ad-hoc recognizers differ between GDPR_EU and GDPR_UK.
 const STRATEGIES: Record<ComplianceFramework, ComplianceStrategy> = {
   [ComplianceFramework.HIPAA]: HIPAA_STRATEGY,
   [ComplianceFramework.GDPR_EU]: GDPR_EU_STRATEGY,
