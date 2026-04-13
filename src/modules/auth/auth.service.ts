@@ -5,7 +5,6 @@ import { JwtService } from '@nestjs/jwt';
 import * as crypto from 'crypto';
 import TemplateUser from '@/common/db/entities/user.entity';
 import MailService from '@/modules/mail/mail.service';
-import { MagicLinkRequestDto } from '@/modules/auth/dto/auth.dto';
 
 @Injectable()
 export default class AuthService {
@@ -16,10 +15,10 @@ export default class AuthService {
     private readonly mailService: MailService,
   ) {}
 
-  async requestMagicLink(dto: MagicLinkRequestDto): Promise<void> {
+  async requestMagicLink(email: string): Promise<void> {
     let user = await this.userRepository
       .createQueryBuilder('user')
-      .where('user.email = :email', { email: dto.email })
+      .where('user.email = :email', { email })
       .getOne();
 
     if (!user) {
@@ -27,12 +26,12 @@ export default class AuthService {
         .createQueryBuilder()
         .insert()
         .into(TemplateUser)
-        .values({ email: dto.email })
+        .values({ email })
         .execute();
 
       user = await this.userRepository
         .createQueryBuilder('user')
-        .where('user.email = :email', { email: dto.email })
+        .where('user.email = :email', { email })
         .getOne();
     }
 
