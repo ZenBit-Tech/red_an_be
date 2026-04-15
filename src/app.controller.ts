@@ -11,7 +11,10 @@ export default class AppController {
   @ApiOperation({
     summary: 'Get a "hello world" message to check if the server is running',
   })
-  @ApiOkResponse({ description: 'message sent successfully' })
+  @ApiOkResponse({
+    description: 'message sent successfully',
+    schema: { type: 'string', example: 'Hello World!' },
+  })
   getHello(): string {
     return this.appService.getHello();
   }

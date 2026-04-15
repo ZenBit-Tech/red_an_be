@@ -24,6 +24,7 @@ module.exports = {
     '@typescript-eslint/no-unsafe-argument': 'warn',
     'max-classes-per-file': 'off',
     'prettier/prettier': ['error', { endOfLine: 'auto' }],
+    'import/prefer-default-export': 'off',
   },
   settings: {
     'import/resolver': {
