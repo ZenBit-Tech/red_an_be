@@ -10,14 +10,6 @@ async function bootstrap() {
   await ensureDatabase();
 
   const app = await NestFactory.create(AppModule);
-  const configService = new ConfigService();
-  const corsOrigin = configService.get<string>('app.corsOrigin') ?? 'http://localhost:5173';
-  app.enableCors({
-    origin: corsOrigin,
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-  });
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle(`${APP_NAME} API`)
@@ -28,6 +20,10 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('api', app, document);
 
+  const configService = new ConfigService();
+
+  const corsOrigin = configService.get<string>('app.corsOrigin') ?? 'http://localhost:5173';
+
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
@@ -35,6 +31,13 @@ async function bootstrap() {
       transform: true,
     }),
   );
+
+  app.enableCors({
+    origin: corsOrigin,
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  });
 
   await app.listen(configService.getOrThrow<number>('PORT') ?? DEFAULT_PORT);
 }
