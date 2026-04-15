@@ -22,6 +22,11 @@ async function bootstrap() {
 
   const configService = new ConfigService();
 
+  app.enableCors({
+    origin: configService.get<string>('FRONTEND_URL'),
+    credentials: true,
+  });
+
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
