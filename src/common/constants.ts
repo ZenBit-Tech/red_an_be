@@ -8,16 +8,3 @@ export const NODE_ENV = {
   PRODUCTION: 'production',
   DEVELOPMENT: 'development',
 };
-
-export const AUTH_CONSTANTS = {
-  JWT_SECRET: process.env.JWT_SECRET || 'super-secret-jwt-key-for-red-an-be',
-  JWT_EXPIRATION: 3600,
-};
-export const USER_ALIASES = {
-  TABLE: 'template_users',
-  ENTITY_ALIAS: 'templateUser',
-};
-
-export const USER_LIMITS = {
-  EMAIL_MAX_LENGTH: 320,
-};

@@ -1,20 +1,35 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
-import { AUTH_CONSTANTS } from '@common/constants';
-import AuthController from '@/modules/auth/auth.controller';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import MailModule from '@/modules/mail/mail.module';
 import TemplateUser from '@/common/db/entities/user.entity';
-import AuthService from '@/modules/auth/auth.service';
+import AuthController from './auth.controller';
+import AuthService from './auth.service';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([TemplateUser]),
-    JwtModule.register({
-      secret: AUTH_CONSTANTS.JWT_SECRET,
-      signOptions: { expiresIn: AUTH_CONSTANTS.JWT_EXPIRATION },
-    }),
     MailModule,
+    ConfigModule,
+    JwtModule.registerAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => {
+        const secret = configService.get<string>('JWT_SECRET');
+        if (!secret) {
+          throw new Error('JWT_SECRET is not defined in environment variables');
+        }
+        const expiresInString = configService.get<string | number>('JWT_EXPIRATION');
+        const expiresIn = Number(expiresInString);
+        return {
+          secret,
+          signOptions: {
+            expiresIn,
+          },
+        };
+      },
+    }),
   ],
   controllers: [AuthController],
   providers: [AuthService],
