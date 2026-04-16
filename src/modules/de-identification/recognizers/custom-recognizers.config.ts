@@ -12,11 +12,8 @@ export type CustomRecognizer = {
   context?: string[];
 };
 
-// ---------------------------------------------------------------------------
-// HIPAA – кастомні recognizers (не вбудовані в Presidio за замовчуванням)
-// ---------------------------------------------------------------------------
-
-const medicalRecordNumberRecognizer: CustomRecognizer = {
+// HIPAA custom recognizers (not built-in to Presidio)
+const medicalRecordNumberRecognizerHippa: CustomRecognizer = {
   name: 'Medical Record Number Recognizer',
   supported_language: 'en',
   supported_entity: 'MEDICAL_RECORD_NUMBER',
@@ -97,9 +94,7 @@ const biometricIdRecognizer: CustomRecognizer = {
   context: ['fingerprint', 'retina', 'iris', 'biometric', 'facial', 'recognition', 'scan'],
 };
 
-// ---------------------------------------------------------------------------
-// GDPR EU – кастомні recognizers
-// ---------------------------------------------------------------------------
+// GDPR EU custom recognizers
 
 const euVatNumberRecognizer: CustomRecognizer = {
   name: 'EU VAT Number Recognizer',
@@ -265,7 +260,7 @@ const ukDriverLicenceRecognizer: CustomRecognizer = {
   context: ['driving', 'driver', 'licence', 'license', 'dvla', 'dvle'],
 };
 
-const ukSortCodeRecognizer: CustomRecognizer = {
+const ukSortCodeRecognizerGdprUk: CustomRecognizer = {
   name: 'UK Sort Code Recognizer',
   supported_language: 'en',
   supported_entity: 'UK_SORT_CODE',
@@ -395,11 +390,9 @@ const tradeUnionRecognizer: CustomRecognizer = {
 };
 
 // ---------------------------------------------------------------------------
-// Мапи по фреймворках
-// ---------------------------------------------------------------------------
-
+// Custom recognizers by framework
 export const HIPAA_CUSTOM_RECOGNIZERS: CustomRecognizer[] = [
-  medicalRecordNumberRecognizer,
+  medicalRecordNumberRecognizerHippa,
   healthPlanBeneficiaryRecognizer,
   vehicleIdRecognizer,
   deviceIdRecognizer,
@@ -422,7 +415,7 @@ export const GDPR_UK_CUSTOM_RECOGNIZERS: CustomRecognizer[] = [
   ukPostcodeRecognizer,
   ukPassportRecognizer,
   ukDriverLicenceRecognizer,
-  ukSortCodeRecognizer,
+  ukSortCodeRecognizerGdprUk,
   geneticDataRecognizer,
   tradeUnionRecognizer,
 ];

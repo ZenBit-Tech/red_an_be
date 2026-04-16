@@ -9,14 +9,12 @@ import {
   APP_VERSION,
   CORS_ALLOWED_HEADERS,
   CORS_ALLOWED_METHODS,
-  CORS_ALLOWED_ORIGINS_ENV,
   DEFAULT_PORT,
-  FRONTEND_DOMAIN_ENV,
 } from './common/constants';
 import ensureDatabase from './common/db/ensure.database';
 
 function resolveCorsOrigins(configService: ConfigService): string[] {
-  const configuredOrigins = configService.get<string>(CORS_ALLOWED_ORIGINS_ENV)?.trim();
+  const configuredOrigins = configService.get<string>('CORS_ALLOWED_ORIGINS')?.trim();
 
   if (configuredOrigins) {
     return configuredOrigins
@@ -25,7 +23,7 @@ function resolveCorsOrigins(configService: ConfigService): string[] {
       .filter((origin) => origin.length > 0);
   }
 
-  const frontendDomain = configService.get<string>(FRONTEND_DOMAIN_ENV)?.trim();
+  const frontendDomain = configService.get<string>('FRONTEND_DOMAIN')?.trim();
 
   if (frontendDomain && frontendDomain.length > 0) {
     return [frontendDomain];
