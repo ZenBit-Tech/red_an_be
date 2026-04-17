@@ -7,11 +7,39 @@ services:
     environment:
       DB_HOST: mysql
       DB_PORT: 3306
+      DE_ID_REMOTE_NLP_URL: http://clinical-curator-remote-nlp:8080
     ports:
       - '${PORT:-3000}:3000'
     depends_on:
       mysql:
         condition: service_healthy
+    networks:
+      - clinical-curator-network
+
+  remote-nlp:
+    build:
+      context: ./remote-nlp
+    container_name: clinical-curator-remote-nlp
+    restart: unless-stopped
+    environment:
+      REMOTE_NLP_MODEL: ${REMOTE_NLP_MODEL:-facebook/bart-large-mnli}
+      REMOTE_NLP_DEVICE: ${REMOTE_NLP_DEVICE:--1}
+      REMOTE_NLP_DEFAULT_THRESHOLD: ${REMOTE_NLP_DEFAULT_THRESHOLD:-0.9}
+      REMOTE_NLP_MAX_SENTENCE_LENGTH: ${REMOTE_NLP_MAX_SENTENCE_LENGTH:-700}
+    ports:
+      - '5003:8080'
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          'import urllib.request; urllib.request.urlopen("http://localhost:8080/health", timeout=2)',
+        ]
+      start_period: 10m
+      interval: 30s
+      timeout: 10s
+      retries: 5
     networks:
       - clinical-curator-network
 
@@ -40,6 +68,9 @@ services:
     image: mcr.microsoft.com/presidio-analyzer:latest
     container_name: clinical-curator-presidio-analyzer
     restart: unless-stopped
+    depends_on:
+      remote-nlp:
+        condition: service_healthy
     ports:
       - '5001:3000'
     networks:

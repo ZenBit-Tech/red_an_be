@@ -6,6 +6,7 @@ import AppService from './app.service';
 import ExampleUserModule from './modules/example-user/example.user.module';
 import { dataSourceOptions } from './common/db/datasource';
 import MailModule from './modules/mail/mail.module';
+import DeIdModule from './modules/de-identification/de-identification.module';
 import AuthModule from './modules/auth/auth.module';
 
 @Module({
@@ -14,6 +15,7 @@ import AuthModule from './modules/auth/auth.module';
     TypeOrmModule.forRoot(dataSourceOptions),
     ExampleUserModule,
     MailModule,
+    DeIdModule,
     AuthModule,
   ],
   controllers: [AppController],

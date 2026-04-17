@@ -1,9 +1,8 @@
 {
   "compilerOptions": {
-    "baseUrl": "./",
     "paths": {
-      "@/*": ["src/*"],
-      "@common/*": ["src/common/*"]
+      "@db/*": ["./src/common/db/*"],
+      "@common/*": ["./src/common/*"]
     },
     "module": "nodenext",
     "moduleResolution": "nodenext",
