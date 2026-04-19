@@ -63,13 +63,6 @@ async function bootstrap() {
     }),
   );
 
-  app.enableCors({
-    origin: corsOrigin,
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-  });
-
   await app.listen(configService.getOrThrow<number>('PORT') ?? DEFAULT_PORT);
 }
 
