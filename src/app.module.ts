@@ -3,7 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import AppController from './app.controller';
 import AppService from './app.service';
-import ExampleUserModule from './modules/example-user/example.user.module';
+import UserModule from './modules/user/user.module';
 import { dataSourceOptions } from './common/db/datasource';
 import MailModule from './modules/mail/mail.module';
 import DeIdModule from './modules/de-identification/de-identification.module';
@@ -13,7 +13,7 @@ import AuthModule from './modules/auth/auth.module';
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     TypeOrmModule.forRoot(dataSourceOptions),
-    ExampleUserModule,
+    UserModule,
     MailModule,
     DeIdModule,
     AuthModule,

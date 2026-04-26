@@ -1,16 +1,16 @@
-export const EXAMPLE_USER_ROUTE = 'example-users';
-export const EXAMPLE_USER_TAG = 'example-users';
+export const USER_ROUTE = 'users';
+export const USER_TAG = 'users';
 
-export const EXAMPLE_USER_ALIASES = {
-  TABLE: 'template_users',
-  ENTITY_ALIAS: 'templateUser',
+export const USER_ALIASES = {
+  TABLE: 'users',
+  ENTITY_ALIAS: 'user',
 };
 
-export const EXAMPLE_USER_LIMITS = {
+export const USER_LIMITS = {
   EMAIL_MAX_LENGTH: 320,
 };
 
-export const EXAMPLE_USER_ERRORS = {
+export const USER_ERRORS = {
   FETCH_ALL_FAILED: 'Failed to fetch users',
   FETCH_ONE_FAILED: 'Failed to fetch user',
   CREATE_FAILED: 'Failed to create user',
@@ -21,7 +21,7 @@ export const EXAMPLE_USER_ERRORS = {
   DB_CONNECTION_FAILED: 'Database connection check failed',
 };
 
-export const EXAMPLE_USER_MESSAGES = {
+export const USER_MESSAGES = {
   DB_CONNECTION_OK: 'Database connection is healthy',
 };
 

@@ -1,6 +1,6 @@
 # red-an-be
 
-A production-ready NestJS backend template with TypeORM (MySQL), ESLint (Airbnb rules), Husky, Swagger, and a fully working example module.
+A production-ready NestJS backend template with TypeORM (MySQL), ESLint (Airbnb rules), Husky, Swagger, and a fully working user module.
 
 ---
 
@@ -24,20 +24,20 @@ src/
 │   ├── db/
 │   │   ├── datasource.ts             # TypeORM DataSource config
 │   │   └── entities/
-│   │       └── example.user.entity.ts
+│   │       └── user.entity.ts
 │   └── utils/
 │       └── isMySqlError.ts           # MySQL error type guard
 ├── migrations/
 │   └── <timestamp>-Init.ts           # Generated migrations go here
 ├── modules/
-│   ├── example-user/                 # ← Use this as a module template
+│   ├── user/
 │   │   ├── dto/
-│   │   │   ├── createExampleUser.dto.ts
-│   │   │   └── returnExampleUser.dto.ts
-│   │   ├── example.user.constants.ts
-│   │   ├── example.user.controller.ts
-│   │   ├── example.user.module.ts
-│   │   └── example.user.service.ts
+│   │   │   ├── createUser.dto.ts
+│   │   │   └── returnUser.dto.ts
+│   │   ├── user.constants.ts
+│   │   ├── user.controller.ts
+│   │   ├── user.module.ts
+│   │   └── user.service.ts
 │   └── mail/
 │       ├── mail.constants.ts
 │       ├── mail.module.ts
@@ -53,7 +53,7 @@ src/
 
 ### Module Example
 
-The `example-user` module demonstrates the standard pattern for all modules:
+The `user` module demonstrates the standard pattern for all modules:
 
 | File                 | Purpose                             |
 | -------------------- | ----------------------------------- |
@@ -84,6 +84,8 @@ Edit `.env` with your MySQL credentials:
 ```env
 PORT=3000
 NODE_ENV=development
+JWT_SECRET=replace_with_strong_random_secret
+JWT_EXPIRATION=3600
 
 DB_TYPE=mysql
 DB_HOST=localhost
@@ -151,17 +153,17 @@ http://localhost:3000/api
 
 This project uses **TypeORM with Query Builder** — no `.find()` / `.save()` shortcuts.
 
-All DB operations go through `createQueryBuilder()`. Example from `example.user.service.ts`:
+All DB operations go through `createQueryBuilder()`. Example from `user.service.ts`:
 
 ```ts
 // SELECT
-const users = await this.userRepository.createQueryBuilder('templateUser').getMany();
+const users = await this.userRepository.createQueryBuilder('user').getMany();
 
 // INSERT
 await this.userRepository
   .createQueryBuilder()
   .insert()
-  .into(TemplateUser)
+  .into(User)
   .values([{ email }])
   .execute();
 ```

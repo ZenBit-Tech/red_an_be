@@ -20,27 +20,23 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
-import UserService from './example.user.service';
-import CreateUserDto from './dto/createExampleUser.dto';
-import ReturnUserDto from './dto/returnExampleUser.dto';
-import {
-  EXAMPLE_USER_ROUTE,
-  EXAMPLE_USER_TAG,
-  EXAMPLE_USER_MESSAGES,
-} from './example.user.constants';
+import UserService from './user.service';
+import CreateUserDto from './dto/createUser.dto';
+import ReturnUserDto from './dto/returnUser.dto';
+import { USER_ROUTE, USER_TAG, USER_MESSAGES } from './user.constants';
 
 type DbHealthResponse = {
   status: string;
   queryResult: number;
 };
 
-@ApiTags(EXAMPLE_USER_TAG)
+@ApiTags(USER_TAG)
 @UseInterceptors(ClassSerializerInterceptor)
-@Controller(EXAMPLE_USER_ROUTE)
+@Controller(USER_ROUTE)
 export default class UserController {
   constructor(private readonly userService: UserService) {}
 
-  @ApiOperation({ summary: 'Create a new template user' })
+  @ApiOperation({ summary: 'Create a new user' })
   @ApiCreatedResponse({
     description: 'User successfully created',
     type: ReturnUserDto,
@@ -54,7 +50,7 @@ export default class UserController {
     return this.userService.create(body);
   }
 
-  @ApiOperation({ summary: 'Get all template users' })
+  @ApiOperation({ summary: 'Get all users' })
   @ApiOkResponse({
     description: 'Users retrieved successfully',
     type: ReturnUserDto,
@@ -84,7 +80,7 @@ export default class UserController {
   }
 
   @ApiOperation({ summary: 'Check database connection using QueryBuilder select' })
-  @ApiOkResponse({ description: EXAMPLE_USER_MESSAGES.DB_CONNECTION_OK })
+  @ApiOkResponse({ description: USER_MESSAGES.DB_CONNECTION_OK })
   @ApiInternalServerErrorResponse({ description: 'Database connection check failed' })
   @Get('health/db')
   async checkDbConnection(): Promise<DbHealthResponse> {

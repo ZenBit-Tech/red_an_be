@@ -2,7 +2,7 @@
 
 ## Creating a New Module
 
-Follow the `example-user` pattern:
+Follow the `user` pattern:
 
 1. Create folder: `src/modules/<your-module>/`
 2. Add `dto/`, `*.entity.ts` in `common/db/entities/`

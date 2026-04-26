@@ -1,15 +1,15 @@
+import { InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import { getRepositoryToken } from '@nestjs/typeorm';
 import { Test, TestingModule } from '@nestjs/testing';
 import { Repository } from 'typeorm';
-import { getRepositoryToken } from '@nestjs/typeorm';
-import { InternalServerErrorException, NotFoundException } from '@nestjs/common';
-import UserService from './example.user.service';
-import TemplateUser from '../../common/db/entities/example.user.entity';
+import User from '../../common/db/entities/user.entity';
+import UserService from './user.service';
 
 describe('UserService', () => {
   let service: UserService;
-  let repo: Repository<TemplateUser>;
+  let repo: Repository<User>;
 
-  const mockUser: TemplateUser = {
+  const mockUser: User = {
     uuid: '1234',
     email: 'test@example.com',
   };
@@ -32,14 +32,11 @@ describe('UserService', () => {
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        UserService,
-        { provide: getRepositoryToken(TemplateUser), useValue: mockRepository },
-      ],
+      providers: [UserService, { provide: getRepositoryToken(User), useValue: mockRepository }],
     }).compile();
 
     service = module.get<UserService>(UserService);
-    repo = module.get<Repository<TemplateUser>>(getRepositoryToken(TemplateUser));
+    repo = module.get<Repository<User>>(getRepositoryToken(User));
   });
 
   it('should be defined', () => {
