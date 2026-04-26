@@ -1,6 +1,8 @@
 import DeIdController from './de-identification.controller';
+import { DeIdStatsPeriod } from './de-identification.constants';
 import DeIdService from './de-identification.service';
 import { AnalyzeRequestDto, PreviewRequestDto } from './dto/request.dto';
+import { DeIdStatsQueryDto } from './dto/stats-query.dto';
 import StatsService from './stats.service';
 
 type DeIdServiceContract = Pick<DeIdService, 'analyzeText' | 'getPreview' | 'getRemoteNlpHealth'>;
@@ -100,6 +102,11 @@ describe('DeIdController', () => {
   });
 
   it('should return de-identification dashboard stats', async () => {
+    const query: DeIdStatsQueryDto = {
+      period: DeIdStatsPeriod.LAST_7_DAYS,
+      timezone: 'Europe/Kyiv',
+    };
+
     statsServiceMock.getDashboardData.mockResolvedValue({
       summary: {
         totalDocs: 5,
@@ -114,10 +121,10 @@ describe('DeIdController', () => {
       ],
     });
 
-    const result = await controller.getStats(TEST_USER);
+    const result = await controller.getStats(TEST_USER, query);
 
     expect(statsServiceMock.getDashboardData).toHaveBeenCalledTimes(1);
-    expect(statsServiceMock.getDashboardData).toHaveBeenCalledWith(TEST_USER.uuid);
+    expect(statsServiceMock.getDashboardData).toHaveBeenCalledWith(TEST_USER.uuid, query);
     expect(result).toEqual({
       summary: {
         totalDocs: 5,

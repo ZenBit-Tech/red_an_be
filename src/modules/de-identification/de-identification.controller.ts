@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import JwtAuthGuard from '../auth/guards/jwt-auth.guard';
@@ -10,6 +10,7 @@ import {
   PreviewResponseDto,
   RemoteNlpHealthResponseDto,
 } from './dto/response.dto';
+import { DeIdStatsQueryDto } from './dto/stats-query.dto';
 import { DeIdStatsResponseDto } from './dto/stats-response.dto';
 import StatsService from './stats.service';
 
@@ -54,7 +55,10 @@ export default class DeIdController {
   @Get('stats')
   @ApiOperation({ summary: 'De-identification dashboard statistics' })
   @ApiOkResponse({ type: DeIdStatsResponseDto })
-  async getStats(@CurrentUser() user: AuthenticatedUser): Promise<DeIdStatsResponseDto> {
-    return this.statsService.getDashboardData(user.uuid);
+  async getStats(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: DeIdStatsQueryDto,
+  ): Promise<DeIdStatsResponseDto> {
+    return this.statsService.getDashboardData(user.uuid, query);
   }
 }
