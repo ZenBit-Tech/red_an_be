@@ -35,6 +35,7 @@ export default class PresidioClient {
     threshold: number,
     entities: string[],
     adHocRecognizers: CustomRecognizer[] = [],
+    allowList: string[] = [],
   ): Promise<AnalyzerFinding[]> {
     try {
       const response = await axios.post<AnalyzerFinding[]>(`${this.analyzerUrl}/analyze`, {
@@ -43,6 +44,7 @@ export default class PresidioClient {
         score_threshold: threshold,
         entities,
         ad_hoc_recognizers: adHocRecognizers,
+        allow_list: allowList,
       });
       return response.data;
     } catch {

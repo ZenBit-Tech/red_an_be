@@ -8,8 +8,204 @@ export type CustomRecognizer = {
   name: string;
   supported_language: string;
   supported_entity: string;
-  patterns: RecognizerPattern[];
+  patterns?: RecognizerPattern[];
+  deny_list?: string[];
   context?: string[];
+};
+
+export const HIPAA_ANALYZER_ALLOW_LIST: string[] = [
+  'daily',
+  'weekly',
+  'monthly',
+  'today',
+  'weeks',
+  'hours',
+  'MD',
+  'age',
+  'years old',
+  'mg',
+  'mmHg',
+  'PO',
+  'PRN',
+  'max',
+  'dose',
+  'doses',
+  'per',
+  'hr',
+  'hrs',
+  'HEENT',
+];
+
+// ---------------------------------------------------------------------------
+// Medical Allow List for HIPAA – words/phrases that MUST NOT be redacted
+// ---------------------------------------------------------------------------
+export const MEDICAL_ALLOWLIST: Record<string, string[]> = {
+  units: ['mg', 'ml', 'g', 'kg', 'l', 'units', 'tabs', 'tablets', 'cc', 'gr', 'tsp', 'tbsp'],
+  frequencies: [
+    'daily',
+    'twice',
+    'morning',
+    'evening',
+    'afternoon',
+    'bedtime',
+    'bid',
+    'tid',
+    'qid',
+    'qh',
+  ],
+  timeframes: [
+    'today',
+    'weeks',
+    'months',
+    'years old',
+    'year',
+    'day',
+    'week',
+    'month',
+    'hour',
+    'hours',
+    'days',
+  ],
+  descriptors: ['each', 'per', 'every', 'before', 'after', 'with', 'without', 'as needed', 'prn'],
+  routes: [
+    'orally',
+    'iv',
+    'im',
+    'sc',
+    'subq',
+    'topical',
+    'sublingual',
+    'intramuscular',
+    'intravenous',
+  ],
+  demographics: ['age'],
+  credentials: ['md', 'do', 'np'],
+  anatomy: ['heent'],
+};
+
+/**
+ * Check if a token is in the medical allow list (case-insensitive)
+ */
+export const isInMedicalAllowlist = (token: string): boolean => {
+  const lowerToken = token.toLowerCase().trim();
+  return Object.values(MEDICAL_ALLOWLIST).some((group) =>
+    group.some((item) => item.toLowerCase() === lowerToken),
+  );
+};
+
+/**
+ * Check if text is a medical measurement (number + unit) that should be preserved
+ * Examples: "50 mg", "2 tablets", "5ml"
+ */
+export const isMedicalMeasurement = (text: string): boolean => {
+  const measurementRegex = /^\d{1,3}\s*(?:mg|ml|g|kg|l|units|tabs|tablets|cc|gr|tsp|tbsp)$/i;
+  return measurementRegex.test(text.trim());
+};
+
+// ---------------------------------------------------------------------------
+// HIPAA CUSTOM RECOGNIZERS – Enhanced for Medical Text Processing
+// ---------------------------------------------------------------------------
+
+const medicalDosageRecognizer: CustomRecognizer = {
+  name: 'Medical Dosage Number Recognizer',
+  supported_language: 'en',
+  supported_entity: 'MEDICAL_DOSAGE',
+  patterns: [
+    {
+      name: 'dosage_with_unit_prefix',
+      // Captures: "50mg", "2 tablets", "5 ml"
+      regex: '\\b(\\d{1,3})\\s*(?:mg|ml|g|kg|l|units|tabs?|tablets|cc|gr|tsp|tbsp)\\b',
+      score: 0.9,
+    },
+    {
+      name: 'dosage_with_frequency',
+      // Captures: "take 2 tablets daily", "dose 50mg twice"
+      regex:
+        '\\b(?:take|give|dose|administer|apply|inject)\\s+(\\d{1,3})\\s+(?:mg|ml|tablets|units|drops)\\s+(?:daily|bid|tid|qid|morning|evening)\\b',
+      score: 0.95,
+    },
+    {
+      name: 'quantity_descriptor',
+      // Captures: "one tablet", "two pills", "three capsules"
+      regex:
+        '\\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\\s+(?:tablet|pill|capsule|drop|dose|unit)s?\\b',
+      score: 0.85,
+    },
+  ],
+  context: [
+    'dose',
+    'dosage',
+    'medication',
+    'drug',
+    'medicine',
+    'tablet',
+    'ml',
+    'mg',
+    'take',
+    'administer',
+  ],
+};
+
+const usSsnFullRecognizer: CustomRecognizer = {
+  name: 'US SSN Full Match Recognizer',
+  supported_language: 'en',
+  supported_entity: 'US_SSN_FULL',
+  patterns: [
+    {
+      name: 'ssn_strict_full_match',
+      // Strict SSN match: 123-45-6789
+      regex: '\\b\\d{3}-\\d{2}-\\d{4}\\b',
+      score: 0.98,
+    },
+  ],
+  context: ['ssn', 'social', 'security', 'patient', 'id', 'number', 'identifier'],
+};
+
+const usZipRecognizer: CustomRecognizer = {
+  name: 'US ZIP Code Recognizer',
+  supported_language: 'en',
+  supported_entity: 'US_ZIP',
+  patterns: [
+    {
+      name: 'us_zip_with_optional_extension',
+      regex: '\\b\\d{5}(?:-\\d{4})?\\b',
+      score: 0.92,
+    },
+  ],
+  context: ['zip', 'zip code', 'zipcode', 'postal', 'address', 'street', 'city'],
+};
+
+const clinicOrganizationRecognizer: CustomRecognizer = {
+  name: 'Clinic Organization Recognizer',
+  supported_language: 'en',
+  supported_entity: 'ORGANIZATION',
+  patterns: [
+    {
+      name: 'clinic_header_line',
+      // catch header-style lines: "Clinic: Vasquez Primary Care Associates"
+      regex: '\\bClinic:\\s*[A-Z][A-Za-z.&-]+(?:\\s+[A-Z][A-Za-z.&-]+){1,6}\\b',
+      score: 0.95,
+    },
+    {
+      name: 'clinic_suffix_pattern',
+      // catch: "Vasquez Primary Care Associates", "St. Mary Medical Center", etc.
+      regex:
+        '\\b[A-Z][A-Za-z]+(?:\\s+[A-Za-z]+){1,4}\\s+(?:Associates|Medical Center|Health System|Care Center|Family Medicine|Urgent Care|Institute|Health Services|Healthcare|Physicians)\\b',
+      score: 0.88,
+    },
+    {
+      name: 'primary_care_associates_with_optional_location',
+      // catch: "Clinic: Vasquez Primary Care Associates, Chicago, IL"
+      regex:
+        '\\b(?:Clinic:\\s*)?[A-Z][A-Za-z.&-]+(?:\\s+[A-Z][A-Za-z.&-]+){0,3}\\s+Primary\\s+Care\\s+Associates(?:\\s*,\\s*[A-Z][A-Za-z]+(?:\\s+[A-Z][A-Za-z]+)*\\s*,\\s*[A-Z]{2})?\\b',
+      score: 0.97,
+    },
+    {
+      name: 'primary_care_pattern',
+      regex: '\\b[A-Z][A-Za-z]+(?:\\s+[A-Za-z]+){0,3}\\s+Primary\\s+Care(?:\\s+Associates)?\\b',
+      score: 0.92,
+    },
+  ],
 };
 
 // HIPAA custom recognizers (not built-in to Presidio)
@@ -180,7 +376,7 @@ const cookieIdRecognizer: CustomRecognizer = {
 };
 
 // ---------------------------------------------------------------------------
-// UK GDPR – кастомні recognizers (специфічні британські ідентифікатори)
+// UK GDPR – custom recognizers (specific British identifiers)
 // ---------------------------------------------------------------------------
 
 const ukNhsNumberRecognizer: CustomRecognizer = {
@@ -392,6 +588,10 @@ const tradeUnionRecognizer: CustomRecognizer = {
 // ---------------------------------------------------------------------------
 // Custom recognizers by framework
 export const HIPAA_CUSTOM_RECOGNIZERS: CustomRecognizer[] = [
+  medicalDosageRecognizer,
+  usSsnFullRecognizer,
+  usZipRecognizer,
+  clinicOrganizationRecognizer,
   medicalRecordNumberRecognizerHippa,
   healthPlanBeneficiaryRecognizer,
   vehicleIdRecognizer,
@@ -407,6 +607,7 @@ export const GDPR_EU_CUSTOM_RECOGNIZERS: CustomRecognizer[] = [
   cookieIdRecognizer,
   deviceIdRecognizer,
   ageRecognizer,
+  clinicOrganizationRecognizer,
 ];
 
 export const GDPR_UK_CUSTOM_RECOGNIZERS: CustomRecognizer[] = [

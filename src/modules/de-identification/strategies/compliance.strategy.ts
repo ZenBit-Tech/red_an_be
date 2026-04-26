@@ -83,14 +83,26 @@ const HIPAA_STRATEGY: ComplianceStrategy = {
   mode: 'strict',
   entities: {
     PERSON: createEntityStrategy([{ type: 'redact' }], { riskLevel: 'high' }),
+    ORGANIZATION: createEntityStrategy([{ type: 'redact' }], { riskLevel: 'high' }),
+    ADDRESS: createEntityStrategy([{ type: 'redact' }], { riskLevel: 'high' }),
     LOCATION: createEntityStrategy([{ type: 'generalize', params: { level: 'state' } }], {
       riskLevel: 'high',
     }),
-    DATE_TIME: createEntityStrategy([{ type: 'generalize', params: { keep: 'year' } }]),
+    DATE_TIME: createEntityStrategy([
+      { type: 'generalize', params: { keep: 'year', strict: true } },
+    ]),
+    AGE: createEntityStrategy([
+      {
+        type: 'aggregate',
+        params: { threshold: 89, replacement: '90+' },
+      },
+    ]),
     PHONE_NUMBER: createEntityStrategy([{ type: 'redact' }]),
     EMAIL_ADDRESS: createEntityStrategy([{ type: 'redact' }]),
-    US_SSN: createEntityStrategy([{ type: 'redact' }]),
-    MEDICAL_RECORD_NUMBER: createEntityStrategy([{ type: 'redact' }]),
+    US_SSN_FULL: createEntityStrategy([{ type: 'redact' }], { riskLevel: 'high' }),
+    MEDICAL_RECORD_NUMBER: createEntityStrategy([{ type: 'redact' }], { riskLevel: 'high' }),
+    MEDICAL_DOSAGE: createEntityStrategy([{ type: 'keep_domain' }], { riskLevel: 'low' }),
+    US_ZIP: createEntityStrategy([{ type: 'redact' }]),
     HEALTH_PLAN_BENEFICIARY: createEntityStrategy([{ type: 'redact' }]),
     CREDIT_CARD: createEntityStrategy([{ type: 'redact' }]),
     US_BANK_NUMBER: createEntityStrategy([{ type: 'redact' }]),
@@ -101,7 +113,7 @@ const HIPAA_STRATEGY: ComplianceStrategy = {
     URL: createEntityStrategy([{ type: 'redact' }]),
     BIOMETRIC_ID: createEntityStrategy([{ type: 'redact' }]),
     IMAGE: createEntityStrategy([{ type: 'redact' }]),
-    FREE_TEXT: createEntityStrategy([{ type: 'redact' }]),
+    FREE_TEXT: createEntityStrategy([{ type: 'keep_domain' }], { riskLevel: 'low' }),
   },
   adHocRecognizers: HIPAA_CUSTOM_RECOGNIZERS,
 };
