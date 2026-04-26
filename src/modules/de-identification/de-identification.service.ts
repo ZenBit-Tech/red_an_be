@@ -207,7 +207,7 @@ export default class DeIdService {
     private readonly configService: ConfigService,
   ) {}
 
-  public async analyzeText(dto: AnalyzeRequestDto): Promise<AnalyzeResult> {
+  public async analyzeText(dto: AnalyzeRequestDto, userUuid?: string): Promise<AnalyzeResult> {
     return this.entityManager.transaction(async (tm): Promise<AnalyzeResult> => {
       try {
         const job = tm.create(DeIdJob, {
@@ -216,6 +216,7 @@ export default class DeIdService {
           preserveStructure: dto.preserveStructure,
           sourceTextHash: DeIdService.calculateTextHash(dto.text),
           sourceTextLength: dto.text.length,
+          userUuid: userUuid ?? null,
         });
         await tm.save(job);
 
@@ -307,10 +308,10 @@ export default class DeIdService {
     });
   }
 
-  public async getPreview(dto: PreviewRequestDto): Promise<string> {
+  public async getPreview(dto: PreviewRequestDto, userUuid?: string): Promise<string> {
     try {
       const job = await this.entityManager.findOne(DeIdJob, {
-        where: { id: dto.jobId },
+        where: userUuid ? { id: dto.jobId, userUuid } : { id: dto.jobId },
       });
 
       if (!job) {

@@ -6,8 +6,8 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import isMySqlError from '../../common/utils/isMySqlError';
-import User from '../../common/db/entities/user.entity';
+import User from '@db/entities/user.entity';
+import isMySqlError from '@common/utils/isMySqlError';
 import CreateUserDto from './dto/createUser.dto';
 import { USER_ALIASES, USER_ERRORS, USER_MESSAGES, MYSQL_ERROR_CODES } from './user.constants';
 

@@ -4,10 +4,13 @@ import {
   Column,
   CreateDateColumn,
   OneToMany,
+  ManyToOne,
+  JoinColumn,
   Index,
 } from 'typeorm';
 import { ComplianceFramework } from '@common/constants/compliance.constants';
 import type DetectedEntity from './detected-entity.entity';
+import type User from './user.entity';
 
 @Entity('de_id_jobs')
 export default class DeIdJob {
@@ -29,6 +32,14 @@ export default class DeIdJob {
 
   @Column({ type: 'int', unsigned: true })
   sourceTextLength!: number;
+
+  @Index()
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  userUuid!: string | null;
+
+  @ManyToOne('User', { onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'userUuid' })
+  user!: User | null;
 
   @OneToMany('DetectedEntity', (entity: DetectedEntity) => entity.job)
   detectedEntities!: DetectedEntity[];

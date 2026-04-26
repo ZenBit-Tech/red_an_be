@@ -2,7 +2,7 @@ import { InternalServerErrorException, NotFoundException } from '@nestjs/common'
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Test, TestingModule } from '@nestjs/testing';
 import { Repository } from 'typeorm';
-import User from '../../common/db/entities/user.entity';
+import User from '@db/entities/user.entity';
 import UserService from './user.service';
 
 describe('UserService', () => {

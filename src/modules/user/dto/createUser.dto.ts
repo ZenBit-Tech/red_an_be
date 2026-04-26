@@ -10,5 +10,5 @@ export default class CreateUserDto {
   @IsEmail()
   @IsNotEmpty()
   @MaxLength(USER_LIMITS.EMAIL_MAX_LENGTH)
-  email: string;
+  email!: string;
 }

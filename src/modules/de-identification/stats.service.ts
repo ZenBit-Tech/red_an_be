@@ -35,7 +35,7 @@ const EMPTY_SUMMARY: DeIdStatsSummaryDto = {
 export default class StatsService {
   constructor(private readonly entityManager: EntityManager) {}
 
-  public async getDashboardData(): Promise<DeIdStatsResponseDto> {
+  public async getDashboardData(userUuid: string): Promise<DeIdStatsResponseDto> {
     try {
       const summaryRows = (await this.entityManager.query(
         `
@@ -47,15 +47,21 @@ export default class StatsService {
             SUM(CASE WHEN dj.framework = ? THEN 1 ELSE 0 END) AS hipaaCount
           FROM detected_entities de
           INNER JOIN de_id_jobs dj ON dj.id = de.jobId
+          WHERE dj.userUuid = ?
         `,
-        [ComplianceFramework.GDPR_EU, ComplianceFramework.HIPAA],
+        [ComplianceFramework.GDPR_EU, ComplianceFramework.HIPAA, userUuid],
       )) as SummaryRow[];
 
-      const entityDistribution = (await this.entityManager.query(`
+      const entityDistribution = (await this.entityManager.query(
+        `
         SELECT category AS label, COUNT(*) AS value
-        FROM detected_entities
+        FROM detected_entities de
+        INNER JOIN de_id_jobs dj ON dj.id = de.jobId
+        WHERE dj.userUuid = ?
         GROUP BY category
-      `)) as ChartRow[];
+      `,
+        [userUuid],
+      )) as ChartRow[];
 
       const summaryRow = summaryRows[0] ?? {};
       const summary: DeIdStatsSummaryDto = {

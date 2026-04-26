@@ -5,6 +5,10 @@ import StatsService from './stats.service';
 
 type DeIdServiceContract = Pick<DeIdService, 'analyzeText' | 'getPreview' | 'getRemoteNlpHealth'>;
 type StatsServiceContract = Pick<StatsService, 'getDashboardData'>;
+const TEST_USER = {
+  uuid: 'user-uuid-1',
+  email: 'user@example.com',
+};
 
 describe('DeIdController', () => {
   let controller: DeIdController;
@@ -52,10 +56,10 @@ describe('DeIdController', () => {
       findings: [],
     });
 
-    const result = await controller.analyze(dto);
+    const result = await controller.analyze(dto, TEST_USER);
 
     expect(deIdServiceMock.analyzeText).toHaveBeenCalledTimes(1);
-    expect(deIdServiceMock.analyzeText).toHaveBeenCalledWith(dto);
+    expect(deIdServiceMock.analyzeText).toHaveBeenCalledWith(dto, TEST_USER.uuid);
     expect(result).toEqual({ jobId: 'job-1', findings: [] });
   });
 
@@ -69,10 +73,10 @@ describe('DeIdController', () => {
 
     deIdServiceMock.getPreview.mockResolvedValue('[REDACT] Doe');
 
-    const result = await controller.preview(dto);
+    const result = await controller.preview(dto, TEST_USER);
 
     expect(deIdServiceMock.getPreview).toHaveBeenCalledTimes(1);
-    expect(deIdServiceMock.getPreview).toHaveBeenCalledWith(dto);
+    expect(deIdServiceMock.getPreview).toHaveBeenCalledWith(dto, TEST_USER.uuid);
     expect(result).toEqual({ anonymizedText: '[REDACT] Doe' });
   });
 
@@ -110,9 +114,10 @@ describe('DeIdController', () => {
       ],
     });
 
-    const result = await controller.getStats();
+    const result = await controller.getStats(TEST_USER);
 
     expect(statsServiceMock.getDashboardData).toHaveBeenCalledTimes(1);
+    expect(statsServiceMock.getDashboardData).toHaveBeenCalledWith(TEST_USER.uuid);
     expect(result).toEqual({
       summary: {
         totalDocs: 5,
