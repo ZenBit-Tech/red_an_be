@@ -1,5 +1,11 @@
 # Contributing
 
+## Frontend Integration
+
+For frontend API integration details (auth flow, de-identification endpoints, stats contract, and request examples), see:
+
+- [docs/frontend-integration.md](./docs/frontend-integration.md)
+
 ## Creating a New Module
 
 Follow the `user` pattern:
