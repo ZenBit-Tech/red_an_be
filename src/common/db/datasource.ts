@@ -1,7 +1,7 @@
 import { DataSource, DataSourceOptions } from 'typeorm';
 import { config } from 'dotenv';
 import { ConfigService } from '@nestjs/config';
-import TemplateUser from './entities/example.user.entity';
+import TemplateUser from './entities/user.entity';
 import DeIdJob from './entities/de-id-job.entity';
 import DetectedEntity from './entities/detected-entity.entity';
 import { NODE_ENV } from '../constants';
