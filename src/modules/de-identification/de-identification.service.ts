@@ -17,7 +17,7 @@ import {
   DE_ID_REMOTE_NLP_ENV,
   DeIdMethod,
 } from '@common/constants/compliance.constants';
-import DeIdJob from '@db/entities/de-id-job.entity';
+import DeIdJob, { DeIdJobStatus } from '@db/entities/de-id-job.entity';
 import DetectedEntity from '@db/entities/detected-entity.entity';
 import { shouldKeepOriginalByContext } from './context/context-aware.util';
 import { normalizeAnonymizedText } from './context/normalization.util';
@@ -163,6 +163,8 @@ const MANDATORY_PREVIEW_ENTITY_CATEGORIES = [
 ] as const;
 const DEFAULT_PHI_VALIDATION_STRICT = true;
 const DEFAULT_PHI_VALIDATION_ALLOW_ZIP3 = true;
+const DEFAULT_ANALYSIS_FAILURE_CODE = 'ANALYSIS_FAILED';
+const MAX_ERROR_CODE_LENGTH = 120;
 
 type TextChunk = {
   text: string;
@@ -217,6 +219,9 @@ export default class DeIdService {
           sourceTextHash: DeIdService.calculateTextHash(dto.text),
           sourceTextLength: dto.text.length,
           userUuid: userUuid ?? null,
+          status: DeIdJobStatus.SUCCESS,
+          processedAt: new Date(),
+          errorCode: null,
         });
         await tm.save(job);
 
@@ -303,9 +308,51 @@ export default class DeIdService {
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
         this.logger.error(`Analysis failed: ${message}`);
+        await this.persistFailedAnalysisJob(dto, userUuid, error);
         throw new InternalServerErrorException('Failed to analyze document');
       }
     });
+  }
+
+  private async persistFailedAnalysisJob(
+    dto: AnalyzeRequestDto,
+    userUuid: string | undefined,
+    error: unknown,
+  ): Promise<void> {
+    if (!('save' in this.entityManager) || typeof this.entityManager.save !== 'function') {
+      return;
+    }
+
+    const errorCode = DeIdService.extractErrorCode(error);
+
+    const failedJob = this.entityManager.create(DeIdJob, {
+      framework: dto.framework,
+      threshold: dto.threshold,
+      preserveStructure: dto.preserveStructure,
+      sourceTextHash: DeIdService.calculateTextHash(dto.text),
+      sourceTextLength: dto.text.length,
+      userUuid: userUuid ?? null,
+      status: DeIdJobStatus.FAILED,
+      processedAt: new Date(),
+      errorCode,
+    });
+
+    await this.entityManager.save(failedJob).catch(() => undefined);
+  }
+
+  private static extractErrorCode(error: unknown): string {
+    if (error instanceof Error) {
+      const normalizedErrorName = error.name
+        .replace(/[^a-zA-Z0-9]+/g, '_')
+        .toUpperCase()
+        .replace(/^_+|_+$/g, '');
+
+      if (normalizedErrorName.length > 0) {
+        return normalizedErrorName.slice(0, MAX_ERROR_CODE_LENGTH);
+      }
+    }
+
+    return DEFAULT_ANALYSIS_FAILURE_CODE;
   }
 
   public async getPreview(dto: PreviewRequestDto, userUuid?: string): Promise<string> {

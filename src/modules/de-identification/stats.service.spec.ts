@@ -32,8 +32,16 @@ describe('StatsService', () => {
     entityManagerMock.query
       .mockResolvedValueOnce([{ value: '5' }])
       .mockResolvedValueOnce([{ value: '10' }])
+      .mockResolvedValueOnce([
+        { status: 'SUCCESS', value: '4' },
+        { status: 'FAILED', value: '1' },
+      ])
       .mockResolvedValueOnce([{ value: '4' }])
       .mockResolvedValueOnce([{ value: '8' }])
+      .mockResolvedValueOnce([
+        { status: 'SUCCESS', value: '3' },
+        { status: 'FAILED', value: '1' },
+      ])
       .mockResolvedValueOnce([
         { framework: 'HIPAA', value: '2' },
         { framework: 'GDPR_EU', value: '2' },
@@ -67,7 +75,7 @@ describe('StatsService', () => {
 
     const result = await service.getDashboardData(TEST_USER_UUID, query);
 
-    expect(entityManagerMock.query).toHaveBeenCalledTimes(10);
+    expect(entityManagerMock.query).toHaveBeenCalledTimes(12);
     expect(result.meta).toEqual({
       period: DeIdStatsPeriod.LAST_7_DAYS,
       timezone: 'Europe/Kyiv',
@@ -80,12 +88,12 @@ describe('StatsService', () => {
       totalDocuments: 5,
       entitiesDetected: 10,
       avgEntitiesPerDoc: 2,
-      successRate: 100,
+      successRate: 80,
       trends: {
         totalDocumentsPct: 25,
         entitiesDetectedPct: 25,
         avgEntitiesPerDocPct: 0,
-        successRatePct: 0,
+        successRatePct: 6.67,
       },
     });
     expect(result.charts.complianceFrameworkUsage).toEqual([

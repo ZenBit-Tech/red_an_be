@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { EntityManager } from 'typeorm';
 import { ComplianceFramework } from '@common/constants/compliance.constants';
+import { DeIdJobStatus } from '@db/entities/de-id-job.entity';
 import {
   DE_ID_STATS_CONFIDENCE_BUCKETS,
   DE_ID_STATS_ERRORS,
@@ -26,6 +27,11 @@ import {
 type DbMetricValue = number | string | null;
 
 type CountRow = {
+  value?: DbMetricValue;
+};
+
+type StatusCountRow = {
+  status?: string;
   value?: DbMetricValue;
 };
 
@@ -226,8 +232,8 @@ export default class StatsService {
         SELECT COUNT(*) AS value
         FROM de_id_jobs dj
         WHERE dj.userUuid = ?
-          AND CONVERT_TZ(dj.createdAt, ?, ?) >= ?
-          AND CONVERT_TZ(dj.createdAt, ?, ?) < ?
+          AND dj.createdAt >= CONVERT_TZ(?, ?, ?)
+          AND dj.createdAt < CONVERT_TZ(?, ?, ?)
       `,
       [userUuid, ...StatsService.buildDateRangeSqlParams(range, dateWindow.timezone)],
     )) as CountRow[];
@@ -238,20 +244,37 @@ export default class StatsService {
         FROM detected_entities de
         INNER JOIN de_id_jobs dj ON dj.id = de.jobId
         WHERE dj.userUuid = ?
-          AND CONVERT_TZ(dj.createdAt, ?, ?) >= ?
-          AND CONVERT_TZ(dj.createdAt, ?, ?) < ?
+          AND dj.createdAt >= CONVERT_TZ(?, ?, ?)
+          AND dj.createdAt < CONVERT_TZ(?, ?, ?)
       `,
       [userUuid, ...StatsService.buildDateRangeSqlParams(range, dateWindow.timezone)],
     )) as CountRow[];
+
+    const statusCountRows = (await this.entityManager.query(
+      `
+        SELECT dj.status AS status, COUNT(*) AS value
+        FROM de_id_jobs dj
+        WHERE dj.userUuid = ?
+          AND dj.createdAt >= CONVERT_TZ(?, ?, ?)
+          AND dj.createdAt < CONVERT_TZ(?, ?, ?)
+        GROUP BY dj.status
+      `,
+      [userUuid, ...StatsService.buildDateRangeSqlParams(range, dateWindow.timezone)],
+    )) as StatusCountRow[];
 
     const totalDocuments = StatsService.normalizeNumber(totalDocumentsRows[0]?.value);
     const entitiesDetected = StatsService.normalizeNumber(totalEntitiesRows[0]?.value);
     const avgEntitiesPerDoc = StatsService.calculateAverage(entitiesDetected, totalDocuments);
 
-    let successRate = DE_ID_STATS_FILTERS.ZERO;
-    if (totalDocuments > DE_ID_STATS_FILTERS.ZERO) {
-      successRate = DE_ID_STATS_FILTERS.DEFAULT_SUCCESS_RATE;
-    }
+    const successfulJobs = statusCountRows.reduce((total, row) => {
+      if (row.status === DeIdJobStatus.SUCCESS) {
+        return total + StatsService.normalizeNumber(row.value);
+      }
+
+      return total;
+    }, DE_ID_STATS_FILTERS.ZERO);
+
+    const successRate = StatsService.calculateSuccessRate(successfulJobs, totalDocuments);
 
     return {
       totalDocuments,
@@ -271,8 +294,8 @@ export default class StatsService {
         SELECT dj.framework AS framework, COUNT(*) AS value
         FROM de_id_jobs dj
         WHERE dj.userUuid = ?
-          AND CONVERT_TZ(dj.createdAt, ?, ?) >= ?
-          AND CONVERT_TZ(dj.createdAt, ?, ?) < ?
+          AND dj.createdAt >= CONVERT_TZ(?, ?, ?)
+          AND dj.createdAt < CONVERT_TZ(?, ?, ?)
         GROUP BY dj.framework
       `,
       [userUuid, ...StatsService.buildDateRangeSqlParams(range, dateWindow.timezone)],
@@ -318,8 +341,8 @@ export default class StatsService {
         FROM detected_entities de
         INNER JOIN de_id_jobs dj ON dj.id = de.jobId
         WHERE dj.userUuid = ?
-          AND CONVERT_TZ(dj.createdAt, ?, ?) >= ?
-          AND CONVERT_TZ(dj.createdAt, ?, ?) < ?
+          AND dj.createdAt >= CONVERT_TZ(?, ?, ?)
+          AND dj.createdAt < CONVERT_TZ(?, ?, ?)
         GROUP BY de.category
         ORDER BY value DESC
       `,
@@ -342,8 +365,8 @@ export default class StatsService {
         SELECT DATE(CONVERT_TZ(dj.createdAt, ?, ?)) AS dayLabel, COUNT(*) AS value
         FROM de_id_jobs dj
         WHERE dj.userUuid = ?
-          AND CONVERT_TZ(dj.createdAt, ?, ?) >= ?
-          AND CONVERT_TZ(dj.createdAt, ?, ?) < ?
+          AND dj.createdAt >= CONVERT_TZ(?, ?, ?)
+          AND dj.createdAt < CONVERT_TZ(?, ?, ?)
         GROUP BY dayLabel
         ORDER BY dayLabel ASC
       `,
@@ -361,8 +384,8 @@ export default class StatsService {
         FROM detected_entities de
         INNER JOIN de_id_jobs dj ON dj.id = de.jobId
         WHERE dj.userUuid = ?
-          AND CONVERT_TZ(dj.createdAt, ?, ?) >= ?
-          AND CONVERT_TZ(dj.createdAt, ?, ?) < ?
+          AND dj.createdAt >= CONVERT_TZ(?, ?, ?)
+          AND dj.createdAt < CONVERT_TZ(?, ?, ?)
         GROUP BY dayLabel
         ORDER BY dayLabel ASC
       `,
@@ -409,8 +432,8 @@ export default class StatsService {
         FROM detected_entities de
         INNER JOIN de_id_jobs dj ON dj.id = de.jobId
         WHERE dj.userUuid = ?
-          AND CONVERT_TZ(dj.createdAt, ?, ?) >= ?
-          AND CONVERT_TZ(dj.createdAt, ?, ?) < ?
+          AND dj.createdAt >= CONVERT_TZ(?, ?, ?)
+          AND dj.createdAt < CONVERT_TZ(?, ?, ?)
       `,
       [userUuid, ...StatsService.buildDateRangeSqlParams(range, dateWindow.timezone)],
     )) as ConfidenceDistributionRow[];
@@ -452,8 +475,8 @@ export default class StatsService {
         FROM detected_entities de
         INNER JOIN de_id_jobs dj ON dj.id = de.jobId
         WHERE dj.userUuid = ?
-          AND CONVERT_TZ(dj.createdAt, ?, ?) >= ?
-          AND CONVERT_TZ(dj.createdAt, ?, ?) < ?
+          AND dj.createdAt >= CONVERT_TZ(?, ?, ?)
+          AND dj.createdAt < CONVERT_TZ(?, ?, ?)
         GROUP BY de.proxyType
         ORDER BY value DESC
       `,
@@ -500,6 +523,16 @@ export default class StatsService {
     }
 
     return StatsService.normalizePercent(numerator / denominator);
+  }
+
+  private static calculateSuccessRate(successfulJobs: number, totalJobs: number): number {
+    if (totalJobs <= DE_ID_STATS_FILTERS.ZERO) {
+      return DE_ID_STATS_FILTERS.ZERO;
+    }
+
+    return StatsService.normalizePercent(
+      (successfulJobs / totalJobs) * DE_ID_STATS_FILTERS.PERCENT_MULTIPLIER,
+    );
   }
 
   private static calculatePercentChange(currentValue: number, previousValue: number): number {
@@ -587,12 +620,12 @@ export default class StatsService {
 
   private static buildDateRangeSqlParams(range: StatsDateRange, timezone: string): string[] {
     return [
-      DE_ID_STATS_FILTERS.SOURCE_UTC_OFFSET,
-      timezone,
       range.startDateTime,
-      DE_ID_STATS_FILTERS.SOURCE_UTC_OFFSET,
       timezone,
+      DE_ID_STATS_FILTERS.SOURCE_UTC_OFFSET,
       range.endDateTimeExclusive,
+      timezone,
+      DE_ID_STATS_FILTERS.SOURCE_UTC_OFFSET,
     ];
   }
 
