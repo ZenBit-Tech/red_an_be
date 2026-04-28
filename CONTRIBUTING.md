@@ -1,8 +1,14 @@
 # Contributing
 
+## Frontend Integration
+
+For frontend API integration details (auth flow, de-identification endpoints, stats contract, and request examples), see:
+
+- [docs/frontend-integration.md](./docs/frontend-integration.md)
+
 ## Creating a New Module
 
-Follow the `example-user` pattern:
+Follow the `user` pattern:
 
 1. Create folder: `src/modules/<your-module>/`
 2. Add `dto/`, `*.entity.ts` in `common/db/entities/`

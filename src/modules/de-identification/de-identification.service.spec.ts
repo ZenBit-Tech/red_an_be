@@ -147,6 +147,260 @@ describe('DeIdService', () => {
     });
   });
 
+  it('should pass strengthened clinic organization recognizer for HIPAA analysis', async () => {
+    const tm: TransactionManagerMock = {
+      create: jest.fn((target: unknown, payload: Record<string, unknown>) => {
+        if (target === DeIdJob) {
+          return {
+            id: 'job-hipaa-org-recognizer',
+            framework: payload.framework,
+            threshold: payload.threshold,
+            preserveStructure: payload.preserveStructure,
+            sourceTextHash: payload.sourceTextHash,
+            sourceTextLength: payload.sourceTextLength,
+          };
+        }
+
+        return {
+          id: 'entity-id',
+          ...payload,
+        };
+      }),
+      save: jest.fn(async (value: unknown) => value),
+    };
+
+    entityManagerMock.transaction.mockImplementation(
+      async (callback: (tx: TransactionManagerMock) => unknown) => callback(tm),
+    );
+
+    presidioClientMock.analyze.mockResolvedValue([] satisfies AnalyzerFinding[]);
+
+    await service.analyzeText({
+      text: 'Clinic: Vasquez Primary Care Associates',
+      framework: ComplianceFramework.HIPAA,
+      threshold: 0.85,
+      preserveStructure: false,
+    });
+
+    const adHocRecognizers = presidioClientMock.analyze.mock.calls[0][3] as Array<{
+      name: string;
+      patterns?: Array<{ name: string; regex: string; score: number }>;
+    }>;
+
+    const clinicRecognizer = adHocRecognizers.find(
+      (recognizer) => recognizer.name === 'Clinic Organization Recognizer',
+    );
+
+    expect(clinicRecognizer).toBeDefined();
+    expect(clinicRecognizer?.patterns).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'clinic_header_line', score: 0.95 }),
+        expect.objectContaining({ name: 'clinic_suffix_pattern', score: 0.88 }),
+        expect.objectContaining({
+          name: 'primary_care_associates_with_optional_location',
+          score: 0.97,
+        }),
+        expect.objectContaining({
+          name: 'primary_care_pattern',
+          score: 0.92,
+          regex: '\\b[A-Z][A-Za-z]+(?:\\s+[A-Za-z]+){0,3}\\s+Primary\\s+Care(?:\\s+Associates)?\\b',
+        }),
+      ]),
+    );
+  });
+
+  it('should include clinic organization recognizer for GDPR_EU analysis', async () => {
+    const tm: TransactionManagerMock = {
+      create: jest.fn((target: unknown, payload: Record<string, unknown>) => {
+        if (target === DeIdJob) {
+          return {
+            id: 'job-gdpr-eu-org-recognizer',
+            framework: payload.framework,
+            threshold: payload.threshold,
+            preserveStructure: payload.preserveStructure,
+            sourceTextHash: payload.sourceTextHash,
+            sourceTextLength: payload.sourceTextLength,
+          };
+        }
+
+        return {
+          id: 'entity-id',
+          ...payload,
+        };
+      }),
+      save: jest.fn(async (value: unknown) => value),
+    };
+
+    entityManagerMock.transaction.mockImplementation(
+      async (callback: (tx: TransactionManagerMock) => unknown) => callback(tm),
+    );
+
+    presidioClientMock.analyze.mockResolvedValue([] satisfies AnalyzerFinding[]);
+
+    await service.analyzeText({
+      text: 'Clinic: Vasquez Primary Care Associates',
+      framework: ComplianceFramework.GDPR_EU,
+      threshold: 0.85,
+      preserveStructure: false,
+    });
+
+    const adHocRecognizers = presidioClientMock.analyze.mock.calls[0][3] as Array<{
+      name: string;
+    }>;
+
+    expect(adHocRecognizers).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'Clinic Organization Recognizer' })]),
+    );
+  });
+
+  it('should match clinic organization sample with city and state suffix', async () => {
+    const tm: TransactionManagerMock = {
+      create: jest.fn((target: unknown, payload: Record<string, unknown>) => {
+        if (target === DeIdJob) {
+          return {
+            id: 'job-clinic-sample-pattern',
+            framework: payload.framework,
+            threshold: payload.threshold,
+            preserveStructure: payload.preserveStructure,
+            sourceTextHash: payload.sourceTextHash,
+            sourceTextLength: payload.sourceTextLength,
+          };
+        }
+
+        return {
+          id: 'entity-id',
+          ...payload,
+        };
+      }),
+      save: jest.fn(async (value: unknown) => value),
+    };
+
+    entityManagerMock.transaction.mockImplementation(
+      async (callback: (tx: TransactionManagerMock) => unknown) => callback(tm),
+    );
+
+    presidioClientMock.analyze.mockResolvedValue([] satisfies AnalyzerFinding[]);
+
+    await service.analyzeText({
+      text: 'Outpatient Progress Note  Clinic:   Vasquez Primary Care Associates, Chicago, IL',
+      framework: ComplianceFramework.HIPAA,
+      threshold: 0.5,
+      preserveStructure: false,
+    });
+
+    const adHocRecognizers = presidioClientMock.analyze.mock.calls[0][3] as Array<{
+      name: string;
+      patterns?: Array<{ name: string; regex: string }>;
+    }>;
+
+    const clinicRecognizer = adHocRecognizers.find(
+      (recognizer) => recognizer.name === 'Clinic Organization Recognizer',
+    );
+
+    const locationPattern = clinicRecognizer?.patterns?.find(
+      (pattern) => pattern.name === 'primary_care_associates_with_optional_location',
+    );
+
+    expect(locationPattern).toBeDefined();
+    const sampleRegex = new RegExp(locationPattern?.regex ?? '', 'g');
+    expect(
+      sampleRegex.test(
+        'Outpatient Progress Note  Clinic:   Vasquez Primary Care Associates, Chicago, IL',
+      ),
+    ).toBe(true);
+  });
+
+  it('should add fallback ORGANIZATION finding for clinic header when analyzer misses it', async () => {
+    const tm: TransactionManagerMock = {
+      create: jest.fn((target: unknown, payload: Record<string, unknown>) => {
+        if (target === DeIdJob) {
+          return {
+            id: 'job-clinic-fallback',
+            framework: payload.framework,
+            threshold: payload.threshold,
+            preserveStructure: payload.preserveStructure,
+            sourceTextHash: payload.sourceTextHash,
+            sourceTextLength: payload.sourceTextLength,
+          };
+        }
+
+        return {
+          id: 'entity-id',
+          ...payload,
+        };
+      }),
+      save: jest.fn(async (value: unknown) => value),
+    };
+
+    entityManagerMock.transaction.mockImplementation(
+      async (callback: (tx: TransactionManagerMock) => unknown) => callback(tm),
+    );
+
+    presidioClientMock.analyze.mockResolvedValue([] satisfies AnalyzerFinding[]);
+
+    const text =
+      'Outpatient Progress Note Clinic: Vasquez Primary Care Associates, Chicago, IL Date of Service: 04/11/2026';
+
+    const result = await service.analyzeText({
+      text,
+      framework: ComplianceFramework.HIPAA,
+      threshold: 0.5,
+      preserveStructure: false,
+    });
+
+    const clinicFinding = result.findings.find((finding) => finding.category === 'ORGANIZATION');
+
+    expect(clinicFinding).toBeDefined();
+    expect(text.substring(clinicFinding?.start ?? 0, clinicFinding?.end ?? 0)).toBe(
+      'Vasquez Primary Care Associates',
+    );
+  });
+
+  it('should allow toggling ORGANIZATION in preview via activeIds', async () => {
+    const text = 'Clinic: Vasquez Primary Care Associates';
+    const hash = createHash('sha256').update(text).digest('hex');
+
+    entityManagerMock.findOne.mockResolvedValue({
+      id: 'job-organization-mandatory',
+      framework: ComplianceFramework.HIPAA,
+      sourceTextHash: hash,
+      sourceTextLength: text.length,
+    } satisfies Partial<DeIdJob>);
+
+    const organizationEntity = {
+      id: 'org-1',
+      jobId: 'job-organization-mandatory',
+      category: 'ORGANIZATION',
+      confidence: 99,
+      start: 8,
+      end: 39,
+      proxyType: 'Redact',
+    } satisfies Partial<DetectedEntity>;
+
+    entityManagerMock.find
+      .mockResolvedValueOnce([] satisfies Partial<DetectedEntity>[]) // 1st preview: activeEntities
+      .mockResolvedValueOnce([] satisfies Partial<DetectedEntity>[]) // 1st preview: mandatoryEntities
+      .mockResolvedValueOnce([organizationEntity] satisfies Partial<DetectedEntity>[]) // 2nd preview: activeEntities
+      .mockResolvedValueOnce([] satisfies Partial<DetectedEntity>[]); // 2nd preview: mandatoryEntities
+
+    const previewWithoutOrganization = await service.getPreview({
+      jobId: 'job-organization-mandatory',
+      text,
+      framework: ComplianceFramework.HIPAA,
+      activeIds: [],
+    });
+
+    const previewWithOrganization = await service.getPreview({
+      jobId: 'job-organization-mandatory',
+      text,
+      framework: ComplianceFramework.HIPAA,
+      activeIds: ['org-1'],
+    });
+
+    expect(previewWithoutOrganization).toBe(text);
+    expect(previewWithOrganization).toBe('Clinic: [REDACT]');
+  });
+
   it('should reject preview when text is inconsistent with analyzed input', async () => {
     entityManagerMock.findOne.mockResolvedValue({
       id: 'job-1',
@@ -283,6 +537,263 @@ describe('DeIdService', () => {
     expect(preview).toBe(
       'He is a [REDACT] and identifies as [REDACT]. Patient has [REDACT] and says he is [REDACT].',
     );
+  });
+
+  it('should clamp PERSON span at field marker and keep non-PHI gender value in preview', async () => {
+    const text =
+      'Patient Name: Maria Gonzalez DOB: 11/22/1991 (Age: 34) Gender: Female Address: 567 Maple Ave';
+    const hash = createHash('sha256').update(text).digest('hex');
+
+    const patientNameStart = text.indexOf('Maria Gonzalez');
+    const crossingPersonEnd = text.indexOf('DOB:') + 'DOB:'.length;
+    const femaleStart = text.indexOf('Female');
+
+    entityManagerMock.findOne.mockResolvedValue({
+      id: 'job-preview-clamp-gender',
+      framework: ComplianceFramework.HIPAA,
+      sourceTextHash: hash,
+      sourceTextLength: text.length,
+    } satisfies Partial<DeIdJob>);
+
+    entityManagerMock.find
+      .mockResolvedValueOnce([
+        {
+          id: 'e-person-crossing',
+          jobId: 'job-preview-clamp-gender',
+          category: 'PERSON',
+          confidence: 93,
+          start: patientNameStart,
+          end: crossingPersonEnd,
+          proxyType: 'Redact',
+        },
+        {
+          id: 'e-female-person',
+          jobId: 'job-preview-clamp-gender',
+          category: 'PERSON',
+          confidence: 88,
+          start: femaleStart,
+          end: femaleStart + 'Female'.length,
+          proxyType: 'Redact',
+        },
+      ] satisfies Partial<DetectedEntity>[])
+      .mockResolvedValueOnce([] satisfies Partial<DetectedEntity>[]);
+
+    const preview = await service.getPreview({
+      jobId: 'job-preview-clamp-gender',
+      text,
+      framework: ComplianceFramework.HIPAA,
+      activeIds: ['e-person-crossing', 'e-female-person'],
+    });
+
+    expect(preview).toContain('Patient Name: [REDACT] DOB: 11/22/1991');
+    expect(preview).toContain('Gender: Female');
+  });
+
+  it('should add structured ADDRESS finding from Address field when analyzer misses street span', async () => {
+    const tm: TransactionManagerMock = {
+      create: jest.fn((target: unknown, payload: Record<string, unknown>) => {
+        if (target === DeIdJob) {
+          return {
+            id: 'job-structured-address',
+            framework: payload.framework,
+            threshold: payload.threshold,
+            preserveStructure: payload.preserveStructure,
+            sourceTextHash: payload.sourceTextHash,
+            sourceTextLength: payload.sourceTextLength,
+          };
+        }
+
+        return {
+          id: `entity-${payload.category as string}`,
+          ...payload,
+        };
+      }),
+      save: jest.fn(async (value: unknown) => value),
+    };
+
+    entityManagerMock.transaction.mockImplementation(
+      async (callback: (tx: TransactionManagerMock) => unknown) => callback(tm),
+    );
+
+    const text =
+      'Gender: Female Address: 567 Maple Ave, Apt 3B, Chicago, IL 60622 Phone: (773) 555-2391';
+    const chicagoStart = text.indexOf('Chicago');
+    const zipStart = text.indexOf('60622');
+
+    presidioClientMock.analyze.mockResolvedValue([
+      {
+        entity_type: 'LOCATION',
+        start: chicagoStart,
+        end: chicagoStart + 'Chicago'.length,
+        score: 0.9,
+      },
+      { entity_type: 'US_ZIP', start: zipStart, end: zipStart + '60622'.length, score: 0.96 },
+    ] satisfies AnalyzerFinding[]);
+
+    const result = await service.analyzeText({
+      text,
+      framework: ComplianceFramework.HIPAA,
+      threshold: 0.5,
+      preserveStructure: false,
+    });
+
+    const addressFinding = result.findings.find((finding) => finding.category === 'ADDRESS');
+    expect(addressFinding).toBeDefined();
+    expect(text.slice(addressFinding?.start ?? 0, addressFinding?.end ?? 0)).toBe(
+      '567 Maple Ave, Apt 3B, Chicago, IL 60622',
+    );
+  });
+
+  it('should avoid broken output when preview spans overlap around DOB and Gender fields', async () => {
+    const text =
+      'Patient Name: Maria Gonzalez DOB: 11/22/1991 (Age: 34) Gender: Female Address: 567 Maple Ave, Apt 3B, Chicago, IL 60622 Phone: (773) 555-2391';
+    const hash = createHash('sha256').update(text).digest('hex');
+
+    const patientNameStart = text.indexOf('Maria Gonzalez');
+    const dobLabelStart = text.indexOf('DOB:');
+    const dateStart = text.indexOf('11/22/1991');
+    const femaleStart = text.indexOf('Female');
+    const addressStart = text.indexOf('567 Maple Ave, Apt 3B, Chicago, IL 60622');
+    const phoneStart = text.indexOf('(773) 555-2391');
+
+    entityManagerMock.findOne.mockResolvedValue({
+      id: 'job-overlap-dob-gender-address',
+      framework: ComplianceFramework.HIPAA,
+      sourceTextHash: hash,
+      sourceTextLength: text.length,
+    } satisfies Partial<DeIdJob>);
+
+    entityManagerMock.find
+      .mockResolvedValueOnce([
+        {
+          id: 'e-person-name-crossing-dob',
+          jobId: 'job-overlap-dob-gender-address',
+          category: 'PERSON',
+          confidence: 94,
+          start: patientNameStart,
+          end: dobLabelStart + 'DOB:'.length,
+          proxyType: 'Redact',
+        },
+        {
+          id: 'e-date-with-dob-label',
+          jobId: 'job-overlap-dob-gender-address',
+          category: 'DATE_TIME',
+          confidence: 97,
+          start: dobLabelStart,
+          end: dateStart + '11/22/1991'.length,
+          proxyType: 'Generalize',
+        },
+        {
+          id: 'e-gender-as-person',
+          jobId: 'job-overlap-dob-gender-address',
+          category: 'PERSON',
+          confidence: 90,
+          start: femaleStart,
+          end: femaleStart + 'Female'.length,
+          proxyType: 'Redact',
+        },
+        {
+          id: 'e-address',
+          jobId: 'job-overlap-dob-gender-address',
+          category: 'ADDRESS',
+          confidence: 99,
+          start: addressStart,
+          end: addressStart + '567 Maple Ave, Apt 3B, Chicago, IL 60622'.length,
+          proxyType: 'Redact',
+        },
+        {
+          id: 'e-phone',
+          jobId: 'job-overlap-dob-gender-address',
+          category: 'PHONE_NUMBER',
+          confidence: 98,
+          start: phoneStart,
+          end: phoneStart + '(773) 555-2391'.length,
+          proxyType: 'Redact',
+        },
+      ] satisfies Partial<DetectedEntity>[])
+      .mockResolvedValueOnce([] satisfies Partial<DetectedEntity>[]);
+
+    const preview = await service.getPreview({
+      jobId: 'job-overlap-dob-gender-address',
+      text,
+      framework: ComplianceFramework.HIPAA,
+      activeIds: [
+        'e-person-name-crossing-dob',
+        'e-date-with-dob-label',
+        'e-gender-as-person',
+        'e-address',
+        'e-phone',
+      ],
+    });
+
+    expect(preview).toContain('Patient Name: [REDACT] DOB: 1991');
+    expect(preview).toContain('Gender: Female');
+    expect(preview).toContain('Address: [REDACT]');
+    expect(preview).toContain('Phone: [REDACT]');
+    expect(preview).not.toContain('[REDACT]CT]');
+  });
+
+  it('should keep Female and still redact address when PERSON span contains "Female Address" without colon', async () => {
+    const text =
+      'Gender: Female Address: 567 Maple Ave, Apt 3B, Chicago, IL 60622 Phone: (773) 555-2391';
+    const hash = createHash('sha256').update(text).digest('hex');
+
+    const femaleStart = text.indexOf('Female');
+    const addressWordStart = text.indexOf('Address');
+    const addressStart = text.indexOf('567 Maple Ave, Apt 3B, Chicago, IL 60622');
+    const phoneStart = text.indexOf('(773) 555-2391');
+
+    entityManagerMock.findOne.mockResolvedValue({
+      id: 'job-female-address-soft-boundary',
+      framework: ComplianceFramework.HIPAA,
+      sourceTextHash: hash,
+      sourceTextLength: text.length,
+    } satisfies Partial<DeIdJob>);
+
+    entityManagerMock.find
+      .mockResolvedValueOnce([
+        {
+          id: 'e-person-female-address-no-colon',
+          jobId: 'job-female-address-soft-boundary',
+          category: 'PERSON',
+          confidence: 89,
+          start: femaleStart,
+          end: addressWordStart + 'Address'.length,
+          proxyType: 'Redact',
+        },
+        {
+          id: 'e-address-main',
+          jobId: 'job-female-address-soft-boundary',
+          category: 'ADDRESS',
+          confidence: 99,
+          start: addressStart,
+          end: addressStart + '567 Maple Ave, Apt 3B, Chicago, IL 60622'.length,
+          proxyType: 'Redact',
+        },
+        {
+          id: 'e-phone-main',
+          jobId: 'job-female-address-soft-boundary',
+          category: 'PHONE_NUMBER',
+          confidence: 98,
+          start: phoneStart,
+          end: phoneStart + '(773) 555-2391'.length,
+          proxyType: 'Redact',
+        },
+      ] satisfies Partial<DetectedEntity>[])
+      .mockResolvedValueOnce([] satisfies Partial<DetectedEntity>[]);
+
+    const preview = await service.getPreview({
+      jobId: 'job-female-address-soft-boundary',
+      text,
+      framework: ComplianceFramework.HIPAA,
+      activeIds: ['e-person-female-address-no-colon', 'e-address-main', 'e-phone-main'],
+    });
+
+    expect(preview).toContain('Gender: Female');
+    expect(preview).toContain('Address: [REDACT]');
+    expect(preview).toContain('Phone: [REDACT]');
+    expect(preview).not.toContain('Gender: [REDACT]');
+    expect(preview).not.toContain('[REDACT]: [REDACT]');
   });
 
   it('should merge remote NLP findings when external recognizers are enabled', async () => {
@@ -885,5 +1396,341 @@ describe('DeIdService', () => {
         preserveStructure: false,
       }),
     ).rejects.toThrow(InternalServerErrorException);
+  });
+
+  describe('filterFalsePositivesByContext (HIPAA medical text)', () => {
+    it('should filter out medical units from Allow List (mg, ml, daily, etc)', async () => {
+      const tm: TransactionManagerMock = {
+        create: jest.fn((target: unknown, payload: Record<string, unknown>) => ({
+          id: 'job-medical-units',
+          ...payload,
+        })),
+        save: jest.fn((entity: unknown) => {
+          if (Array.isArray(entity)) return Promise.resolve(entity);
+          return Promise.resolve(entity);
+        }),
+      };
+
+      entityManagerMock.transaction.mockImplementation(
+        async (callback: (tx: TransactionManagerMock) => unknown) => callback(tm),
+      );
+
+      // Text with medical units that should be filtered
+      const medicalText = 'Patient takes 50 mg daily and 2 ml of medication';
+      presidioClientMock.analyze.mockResolvedValue([
+        { entity_type: 'DATE_TIME', start: 15, end: 17, score: 0.6 }, // "50" near "mg"
+        { entity_type: 'DATE_TIME', start: 38, end: 39, score: 0.6 }, // "2" near "ml"
+      ] satisfies AnalyzerFinding[]);
+
+      const result = await service.analyzeText({
+        text: medicalText,
+        framework: ComplianceFramework.HIPAA,
+        threshold: 0.5,
+        preserveStructure: false,
+      });
+
+      // These numbers should be filtered out due to medical context
+      expect(result.findings.length).toBeLessThanOrEqual(2);
+    });
+
+    it('should filter out numbers in Physical Exam context (vitals)', async () => {
+      const tm: TransactionManagerMock = {
+        create: jest.fn((target: unknown, payload: Record<string, unknown>) => ({
+          id: 'job-vitals',
+          ...payload,
+        })),
+        save: jest.fn((entity: unknown) => {
+          if (Array.isArray(entity)) return Promise.resolve(entity);
+          return Promise.resolve(entity);
+        }),
+      };
+
+      entityManagerMock.transaction.mockImplementation(
+        async (callback: (tx: TransactionManagerMock) => unknown) => callback(tm),
+      );
+
+      // Text with vital signs
+      const vitalText = 'Physical Exam: BP: 120/80, HR: 72, Temp: 98.6F';
+      presidioClientMock.analyze.mockResolvedValue([
+        { entity_type: 'DATE_TIME', start: 19, end: 22, score: 0.6 }, // "120" in BP
+        { entity_type: 'DATE_TIME', start: 33, end: 35, score: 0.6 }, // "72" in HR
+      ] satisfies AnalyzerFinding[]);
+
+      const result = await service.analyzeText({
+        text: vitalText,
+        framework: ComplianceFramework.HIPAA,
+        threshold: 0.5,
+        preserveStructure: false,
+      });
+
+      // Numbers in Physical Exam context should be filtered
+      expect(result.findings.length).toBeLessThanOrEqual(2);
+    });
+
+    it('should keep absolute DATE_TIME even in Physical Exam context', async () => {
+      const tm: TransactionManagerMock = {
+        create: jest.fn((target: unknown, payload: Record<string, unknown>) => ({
+          id: 'job-absolute-date-vitals',
+          ...payload,
+        })),
+        save: jest.fn((entity: unknown) => {
+          if (Array.isArray(entity)) return Promise.resolve(entity);
+          return Promise.resolve(entity);
+        }),
+      };
+
+      entityManagerMock.transaction.mockImplementation(
+        async (callback: (tx: TransactionManagerMock) => unknown) => callback(tm),
+      );
+
+      const text = 'Physical Exam on 04/11/2026: BP 120/80, HR 72.';
+      presidioClientMock.analyze.mockResolvedValue([
+        { entity_type: 'DATE_TIME', start: 17, end: 27, score: 0.55 },
+        { entity_type: 'DATE_TIME', start: 32, end: 35, score: 0.55 },
+        { entity_type: 'DATE_TIME', start: 43, end: 45, score: 0.55 },
+      ] satisfies AnalyzerFinding[]);
+
+      const result = await service.analyzeText({
+        text,
+        framework: ComplianceFramework.HIPAA,
+        threshold: 0.5,
+        preserveStructure: false,
+      });
+
+      expect(result.findings).toHaveLength(1);
+      expect(result.findings[0].category).toBe('DATE_TIME');
+      expect(result.findings[0].start).toBe(17);
+      expect(result.findings[0].end).toBe(27);
+    });
+
+    it('should NOT filter high-risk entities (SSN, MRN) even in medication context', async () => {
+      const tm: TransactionManagerMock = {
+        create: jest.fn((target: unknown, payload: Record<string, unknown>) => ({
+          id: 'job-high-risk',
+          ...payload,
+        })),
+        save: jest.fn((entity: unknown) => {
+          if (Array.isArray(entity)) return Promise.resolve(entity);
+          return Promise.resolve(entity);
+        }),
+      };
+
+      entityManagerMock.transaction.mockImplementation(
+        async (callback: (tx: TransactionManagerMock) => unknown) => callback(tm),
+      );
+
+      const ssnText = 'Patient SSN: 123-45-6789 prescribed 50 mg daily';
+      presidioClientMock.analyze.mockResolvedValue([
+        { entity_type: 'US_SSN_FULL', start: 13, end: 24, score: 0.98 }, // 123-45-6789
+      ] satisfies AnalyzerFinding[]);
+
+      const result = await service.analyzeText({
+        text: ssnText,
+        framework: ComplianceFramework.HIPAA,
+        threshold: 0.5,
+        preserveStructure: false,
+      });
+
+      // High-risk SSN should NOT be filtered
+      expect(result.findings).toHaveLength(1);
+      expect(result.findings[0].category).toBe('US_SSN_FULL');
+    });
+
+    it('should keep age values below 90 when explicitly labeled as age', async () => {
+      const tm: TransactionManagerMock = {
+        create: jest.fn((target: unknown, payload: Record<string, unknown>) => ({
+          id: 'job-age',
+          ...payload,
+        })),
+        save: jest.fn((entity: unknown) => {
+          if (Array.isArray(entity)) return Promise.resolve(entity);
+          return Promise.resolve(entity);
+        }),
+      };
+
+      entityManagerMock.transaction.mockImplementation(
+        async (callback: (tx: TransactionManagerMock) => unknown) => callback(tm),
+      );
+
+      const ageText = 'Age: 52. Patient reports no other complaints.';
+      presidioClientMock.analyze.mockResolvedValue([
+        { entity_type: 'DATE_TIME', start: 5, end: 7, score: 0.72 },
+      ] satisfies AnalyzerFinding[]);
+
+      const result = await service.analyzeText({
+        text: ageText,
+        framework: ComplianceFramework.HIPAA,
+        threshold: 0.5,
+        preserveStructure: false,
+      });
+
+      expect(result.findings).toHaveLength(0);
+    });
+
+    it('should filter doctor credentials like MD from location false positives', async () => {
+      const tm: TransactionManagerMock = {
+        create: jest.fn((target: unknown, payload: Record<string, unknown>) => ({
+          id: 'job-md-title',
+          ...payload,
+        })),
+        save: jest.fn((entity: unknown) => {
+          if (Array.isArray(entity)) return Promise.resolve(entity);
+          return Promise.resolve(entity);
+        }),
+      };
+
+      entityManagerMock.transaction.mockImplementation(
+        async (callback: (tx: TransactionManagerMock) => unknown) => callback(tm),
+      );
+
+      const doctorText = 'Attending physician: Jane Smith, MD';
+      presidioClientMock.analyze.mockResolvedValue([
+        { entity_type: 'LOCATION', start: 33, end: 35, score: 0.81 },
+      ] satisfies AnalyzerFinding[]);
+
+      const result = await service.analyzeText({
+        text: doctorText,
+        framework: ComplianceFramework.HIPAA,
+        threshold: 0.5,
+        preserveStructure: false,
+      });
+
+      expect(result.findings).toHaveLength(0);
+    });
+
+    it('should filter HEENT abbreviation as medical allow-list term', async () => {
+      const tm: TransactionManagerMock = {
+        create: jest.fn((target: unknown, payload: Record<string, unknown>) => ({
+          id: 'job-heent-abbreviation',
+          ...payload,
+        })),
+        save: jest.fn((entity: unknown) => {
+          if (Array.isArray(entity)) return Promise.resolve(entity);
+          return Promise.resolve(entity);
+        }),
+      };
+
+      entityManagerMock.transaction.mockImplementation(
+        async (callback: (tx: TransactionManagerMock) => unknown) => callback(tm),
+      );
+
+      const physicalExamText =
+        'Physical Exam: Normal general, HEENT, cardiac, pulmonary, abdominal, and neurological exam.';
+      const heentStart = physicalExamText.indexOf('HEENT');
+
+      presidioClientMock.analyze.mockResolvedValue([
+        {
+          entity_type: 'LOCATION',
+          start: heentStart,
+          end: heentStart + 'HEENT'.length,
+          score: 0.9,
+        },
+      ] satisfies AnalyzerFinding[]);
+
+      const result = await service.analyzeText({
+        text: physicalExamText,
+        framework: ComplianceFramework.HIPAA,
+        threshold: 0.5,
+        preserveStructure: false,
+      });
+
+      expect(result.findings).toHaveLength(0);
+    });
+
+    it('should keep ZIP codes as high-risk HIPAA findings', async () => {
+      const tm: TransactionManagerMock = {
+        create: jest.fn((target: unknown, payload: Record<string, unknown>) => ({
+          id: 'job-zip',
+          ...payload,
+        })),
+        save: jest.fn((entity: unknown) => {
+          if (Array.isArray(entity)) return Promise.resolve(entity);
+          return Promise.resolve(entity);
+        }),
+      };
+
+      entityManagerMock.transaction.mockImplementation(
+        async (callback: (tx: TransactionManagerMock) => unknown) => callback(tm),
+      );
+
+      const zipText = 'Address: 101 Main Street, Boston, MA 02118';
+      presidioClientMock.analyze.mockResolvedValue([
+        { entity_type: 'US_ZIP', start: 37, end: 42, score: 0.93 },
+      ] satisfies AnalyzerFinding[]);
+
+      const result = await service.analyzeText({
+        text: zipText,
+        framework: ComplianceFramework.HIPAA,
+        threshold: 0.5,
+        preserveStructure: false,
+      });
+
+      expect(result.findings.some((finding) => finding.category === 'US_ZIP')).toBe(true);
+    });
+
+    it('should keep actual dates even when age context appears nearby', async () => {
+      const tm: TransactionManagerMock = {
+        create: jest.fn((target: unknown, payload: Record<string, unknown>) => ({
+          id: 'job-age-date',
+          ...payload,
+        })),
+        save: jest.fn((entity: unknown) => {
+          if (Array.isArray(entity)) return Promise.resolve(entity);
+          return Promise.resolve(entity);
+        }),
+      };
+
+      entityManagerMock.transaction.mockImplementation(
+        async (callback: (tx: TransactionManagerMock) => unknown) => callback(tm),
+      );
+
+      const ageAndDateText = 'Age documented on 01/02/2024 during intake.';
+      presidioClientMock.analyze.mockResolvedValue([
+        { entity_type: 'DATE_TIME', start: 18, end: 28, score: 0.9 },
+      ] satisfies AnalyzerFinding[]);
+
+      const result = await service.analyzeText({
+        text: ageAndDateText,
+        framework: ComplianceFramework.HIPAA,
+        threshold: 0.5,
+        preserveStructure: false,
+      });
+
+      expect(result.findings).toHaveLength(1);
+      expect(result.findings[0].category).toBe('DATE_TIME');
+    });
+
+    it('should filter LOCATION without location context keywords', async () => {
+      const tm: TransactionManagerMock = {
+        create: jest.fn((target: unknown, payload: Record<string, unknown>) => ({
+          id: 'job-location',
+          ...payload,
+        })),
+        save: jest.fn((entity: unknown) => {
+          if (Array.isArray(entity)) return Promise.resolve(entity);
+          return Promise.resolve(entity);
+        }),
+      };
+
+      entityManagerMock.transaction.mockImplementation(
+        async (callback: (tx: TransactionManagerMock) => unknown) => callback(tm),
+      );
+
+      // LOCATION without proper context (low score = likely false positive)
+      const text = 'Patient reports symptoms in 2024';
+      presidioClientMock.analyze.mockResolvedValue([
+        { entity_type: 'LOCATION', start: 28, end: 32, score: 0.6 }, // \"2024\" misidentified as location
+      ] satisfies AnalyzerFinding[]);
+
+      const result = await service.analyzeText({
+        text,
+        framework: ComplianceFramework.HIPAA,
+        threshold: 0.5,
+        preserveStructure: false,
+      });
+
+      // Low-confidence LOCATION without context should be filtered
+      expect(result.findings.length).toBeLessThanOrEqual(1);
+    });
   });
 });

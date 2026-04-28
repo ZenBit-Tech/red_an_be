@@ -1,13 +1,13 @@
 import { Entity, Column, PrimaryGeneratedColumn, Index } from 'typeorm';
 
-@Entity('template_users')
-@Index('IDX_TEMPLATE_USERS_EMAIL', ['email'])
-export default class TemplateUser {
+@Entity('users')
+@Index('IDX_USERS_EMAIL', ['email'])
+export default class User {
   @PrimaryGeneratedColumn('uuid')
-  uuid: string;
+  uuid!: string;
 
   @Column({ unique: true, nullable: false })
-  email: string;
+  email!: string;
 
   @Column({ type: 'varchar', nullable: true })
   magicLinkToken?: string | null;

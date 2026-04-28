@@ -1,7 +1,7 @@
 import { DataSource, DataSourceOptions } from 'typeorm';
 import { config } from 'dotenv';
 import { ConfigService } from '@nestjs/config';
-import TemplateUser from './entities/user.entity';
+import User from './entities/user.entity';
 import DeIdJob from './entities/de-id-job.entity';
 import DetectedEntity from './entities/detected-entity.entity';
 import { NODE_ENV } from '../constants';
@@ -25,7 +25,7 @@ export const dataSourceOptions: DataSourceOptions = {
   username: configService.getOrThrow<string>('DB_USERNAME'),
   password: configService.getOrThrow<string>('DB_PASSWORD'),
   database: configService.getOrThrow<string>('DB_NAME'),
-  entities: [TemplateUser, DeIdJob, DetectedEntity],
+  entities: [User, DeIdJob, DetectedEntity],
   migrations,
   migrationsRun: shouldAutoRunMigrations,
   synchronize: false,
