@@ -33,10 +33,12 @@ function resolveCorsOrigins(configService: ConfigService): string[] {
 }
 
 async function bootstrap() {
-  await ensureDatabase();
+  if (process.env.NODE_ENV !== 'production') {
+    await ensureDatabase();
+  }
 
   const app = await NestFactory.create(AppModule);
-  const configService = new ConfigService();
+  const configService = app.get(ConfigService);
   const corsOrigins = resolveCorsOrigins(configService);
 
   app.enableCors({
@@ -64,7 +66,8 @@ async function bootstrap() {
     }),
   );
 
-  await app.listen(configService.getOrThrow<number>('PORT') ?? DEFAULT_PORT);
+  const port = configService.get<number>('PORT') || process.env.PORT || DEFAULT_PORT;
+  await app.listen(port, '0.0.0.0');
 }
 
 bootstrap().catch(() => {
