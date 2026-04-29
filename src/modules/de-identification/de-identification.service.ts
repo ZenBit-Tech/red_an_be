@@ -17,8 +17,8 @@ import {
   DE_ID_REMOTE_NLP_ENV,
   DeIdMethod,
 } from '@common/constants/compliance.constants';
-import DeIdJob, { DeIdJobStatus } from '@db/entities/de-id-job.entity';
-import DetectedEntity from '@db/entities/detected-entity.entity';
+import DeIdJob, { DeIdJobStatus } from '@common/db/entities/de-id-job.entity';
+import DetectedEntity from '@common/db/entities/detected-entity.entity';
 import { shouldKeepOriginalByContext } from './context/context-aware.util';
 import { normalizeAnonymizedText } from './context/normalization.util';
 import { PhiLeakDetectedError, ValidationOptions, validatePhi } from './context/phi-validator.util';

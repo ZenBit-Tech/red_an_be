@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
 import * as crypto from 'crypto';
-import User from '@db/entities/user.entity';
+import User from '@common/db/entities/user.entity';
 import MailService from '../mail/mail.service';
 
 @Injectable()

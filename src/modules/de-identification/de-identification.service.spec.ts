@@ -8,8 +8,8 @@ import {
   DE_ID_EXTERNAL_RECOGNIZERS_ENV,
   DE_ID_REMOTE_NLP_ENV,
 } from '@common/constants/compliance.constants';
-import DeIdJob from '@db/entities/de-id-job.entity';
-import DetectedEntity from '@db/entities/detected-entity.entity';
+import DeIdJob from '@common/db/entities/de-id-job.entity';
+import DetectedEntity from '@common/db/entities/detected-entity.entity';
 import DeIdService from './de-identification.service';
 import PresidioClient from './presidio.client';
 import RemoteNlpClient from './remote-nlp.client';

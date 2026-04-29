@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { EntityManager } from 'typeorm';
 import { ComplianceFramework } from '@common/constants/compliance.constants';
-import { DeIdJobStatus } from '@db/entities/de-id-job.entity';
+import { DeIdJobStatus } from '@common/db/entities/de-id-job.entity';
 import {
   DE_ID_STATS_CONFIDENCE_BUCKETS,
   DE_ID_STATS_ERRORS,
