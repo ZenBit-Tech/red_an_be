@@ -362,7 +362,7 @@ export default class StatsService {
   ): Promise<DeIdStatsProcessingHistoryItemDto[]> {
     const documentsRows = (await this.entityManager.query(
       `
-        SELECT DATE(CONVERT_TZ(dj.createdAt, ?, ?)) AS dayLabel, COUNT(*) AS value
+        SELECT DATE_FORMAT(CONVERT_TZ(dj.createdAt, ?, ?), '%Y-%m-%d') AS dayLabel, COUNT(*) AS value
         FROM de_id_jobs dj
         WHERE dj.userUuid = ?
           AND dj.createdAt >= CONVERT_TZ(?, ?, ?)
@@ -380,7 +380,7 @@ export default class StatsService {
 
     const entitiesRows = (await this.entityManager.query(
       `
-        SELECT DATE(CONVERT_TZ(dj.createdAt, ?, ?)) AS dayLabel, COUNT(*) AS value
+        SELECT DATE_FORMAT(CONVERT_TZ(dj.createdAt, ?, ?), '%Y-%m-%d') AS dayLabel, COUNT(*) AS value
         FROM detected_entities de
         INNER JOIN de_id_jobs dj ON dj.id = de.jobId
         WHERE dj.userUuid = ?
