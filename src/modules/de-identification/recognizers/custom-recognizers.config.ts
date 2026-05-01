@@ -36,6 +36,19 @@ export const HIPAA_ANALYZER_ALLOW_LIST: string[] = [
   'HEENT',
 ];
 
+export const GDPR_EU_ANALYZER_ALLOW_LIST: string[] = [
+  'PHQ-9',
+  'PHQ-2',
+  'GAD-7',
+  'GAD-2',
+  'HAM-A',
+  'HDRS',
+  'MMSE',
+  'MoCA',
+  'CAGE',
+  'AUDIT',
+];
+
 // ---------------------------------------------------------------------------
 // Medical Allow List for HIPAA – words/phrases that MUST NOT be redacted
 // ---------------------------------------------------------------------------
@@ -81,6 +94,18 @@ export const MEDICAL_ALLOWLIST: Record<string, string[]> = {
   demographics: ['age'],
   credentials: ['md', 'do', 'np'],
   anatomy: ['heent'],
+  clinical_scales: [
+    'PHQ-9',
+    'PHQ-2',
+    'GAD-7',
+    'GAD-2',
+    'HAM-A',
+    'HDRS',
+    'MMSE',
+    'MoCA',
+    'CAGE',
+    'AUDIT',
+  ],
 };
 
 /**
@@ -204,6 +229,12 @@ const clinicOrganizationRecognizer: CustomRecognizer = {
       name: 'primary_care_pattern',
       regex: '\\b[A-Z][A-Za-z]+(?:\\s+[A-Za-z]+){0,3}\\s+Primary\\s+Care(?:\\s+Associates)?\\b',
       score: 0.92,
+    },
+    {
+      name: 'policlinico_university_connector_pattern',
+      regex:
+        '\\bPoliclinico\\s+[A-Z][A-Za-z]*(?:\\s+(?:[A-Z][A-Za-z]*|[IVX]{1,4}))*(?:\\s*(?:–|-|,)\\s*(?:[A-Z][A-Za-z]+(?:\\s+[A-Za-z]+)*)?\\s*University(?:\\s+of\\s+[A-Z][A-Za-z]+(?:\\s+[A-Za-z]+)*)?)\\b',
+      score: 0.9,
     },
   ],
 };
@@ -494,8 +525,28 @@ const ageRecognizer: CustomRecognizer = {
       regex: '\\b\\d{1,3}\\s+yrs?\\.?(?:\\s+old)?\\b',
       score: 0.75,
     },
+    {
+      name: 'Age label format',
+      regex: '(?:\\(Age:\\s*\\d{1,3}\\)|\\bAge:\\s*\\d{1,3}\\b)',
+      score: 0.88,
+    },
   ],
   context: ['age', 'aged', 'old', 'year', 'years', 'yrs', 'born', 'birth', 'patient'],
+};
+
+const genderRecognizer: CustomRecognizer = {
+  name: 'Gender Recognizer',
+  supported_language: 'en',
+  supported_entity: 'GENDER',
+  patterns: [
+    {
+      name: 'Gender label format',
+      regex: '\\b(?:Gender|Sex):\\s*(?:Male|Female|Non-binary|Other)\\b',
+      score: 0.9,
+    },
+  ],
+  deny_list: ['Male', 'Female', 'Non-binary', 'Other'],
+  context: ['gender', 'sex', 'male', 'female', 'non-binary'],
 };
 
 // ---------------------------------------------------------------------------
@@ -586,9 +637,78 @@ const tradeUnionRecognizer: CustomRecognizer = {
 };
 
 // ---------------------------------------------------------------------------
+// GDPR EU – Italian Codice Fiscale
+// ---------------------------------------------------------------------------
+
+const italianCodiceFiscaleRecognizer: CustomRecognizer = {
+  name: 'Italian Codice Fiscale Recognizer',
+  supported_language: 'en',
+  supported_entity: 'NATIONAL_ID',
+  patterns: [
+    {
+      name: 'Codice Fiscale',
+      // Structure: 3 surname consonants + 3 given-name consonants + 2-digit year
+      // + month letter (A-E,H,L,M,P,R,S,T) + 2-digit day + gender letter
+      // + 3-digit municipality code + check letter
+      regex: '\\b[A-Z]{6,7}\\d{2}[A-EHLMPRST]\\d{2}[A-Z]\\d{3}[A-Z]\\b',
+      score: 0.97,
+    },
+  ],
+  context: ['codice', 'fiscale', 'cf', 'tax', 'italian'],
+};
+
+// ---------------------------------------------------------------------------
+// Italian address recognizer – catches Via/Corso/Piazza street formats
+const italianAddressRecognizer: CustomRecognizer = {
+  name: 'Italian Address Recognizer',
+  supported_language: 'en',
+  supported_entity: 'ADDRESS',
+  patterns: [
+    {
+      name: 'italian_street_with_number',
+      // Captures: "Via Roma 1", "Corso Italia 22", "Piazza Navona 3, 00100"
+      regex:
+        '\\b(?:Via|Corso|Piazza|Viale|Vicolo|Largo|Strada)\\s+[A-Za-z][A-Za-z\\s]+\\d+(?:,?\\s*\\d{5})?\\b',
+      score: 0.9,
+    },
+  ],
+  context: ['address', 'via', 'corso', 'piazza', 'residenza', 'indirizzo', 'domicilio'],
+};
+
+const clinicalDateRecognizer: CustomRecognizer = {
+  name: 'Clinical Date Recognizer',
+  supported_language: 'en',
+  supported_entity: 'DATE_TIME',
+  patterns: [
+    {
+      name: 'day_month_name_year',
+      // Captures: "08 April 2026", "8 Apr 2026"
+      regex:
+        '\\b\\d{1,2}\\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\\s+\\d{4}\\b',
+      score: 0.95,
+    },
+    {
+      name: 'month_name_day_year',
+      // Captures: "April 08, 2026", "Apr 8 2026"
+      regex:
+        '\\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\\s+\\d{1,2},?\\s+\\d{4}\\b',
+      score: 0.95,
+    },
+    {
+      name: 'numeric_date_dmy',
+      // Captures: "08/04/2026", "08-04-2026", "08.04.2026"
+      regex: '\\b\\d{1,2}[/.\\-]\\d{1,2}[/.\\-]\\d{4}\\b',
+      score: 0.92,
+    },
+  ],
+  context: ['date', 'consultation', 'visit', 'appointment', 'admission', 'discharge', 'issue'],
+};
+
+// ---------------------------------------------------------------------------
 // Custom recognizers by framework
 export const HIPAA_CUSTOM_RECOGNIZERS: CustomRecognizer[] = [
   medicalDosageRecognizer,
+  clinicalDateRecognizer,
   usSsnFullRecognizer,
   usZipRecognizer,
   clinicOrganizationRecognizer,
@@ -600,17 +720,22 @@ export const HIPAA_CUSTOM_RECOGNIZERS: CustomRecognizer[] = [
 ];
 
 export const GDPR_EU_CUSTOM_RECOGNIZERS: CustomRecognizer[] = [
+  clinicalDateRecognizer,
   euVatNumberRecognizer,
   nationalIdRecognizer,
+  italianCodiceFiscaleRecognizer,
   bankAccountRecognizer,
   biologicalDataRecognizer,
   cookieIdRecognizer,
   deviceIdRecognizer,
   ageRecognizer,
+  genderRecognizer,
   clinicOrganizationRecognizer,
+  italianAddressRecognizer,
 ];
 
 export const GDPR_UK_CUSTOM_RECOGNIZERS: CustomRecognizer[] = [
+  clinicalDateRecognizer,
   ukNhsNumberRecognizer,
   ukNinoRecognizer,
   ukPostcodeRecognizer,

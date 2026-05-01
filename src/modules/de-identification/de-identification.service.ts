@@ -36,6 +36,7 @@ import {
   getComplianceStrategy,
 } from './strategies/compliance.strategy';
 import {
+  GDPR_EU_ANALYZER_ALLOW_LIST,
   HIPAA_ANALYZER_ALLOW_LIST,
   MEDICAL_ALLOWLIST,
   isInMedicalAllowlist,
@@ -93,6 +94,13 @@ const AGE_CONTEXT_KEYWORDS = [
   'yo',
   'y/o',
   'y.o.', // medical abbreviations
+];
+const DATE_TIME_CONTEXT_KEYWORDS = [
+  'consultation',
+  'visit',
+  'appointment',
+  'discharge',
+  'admission',
 ];
 const STRUCTURED_FIELD_LABELS = [
   'Clinic',
@@ -152,6 +160,9 @@ const ORGANIZATION_ENTITY_TYPE = 'ORGANIZATION';
 const ABSOLUTE_DATE_PATTERN = /\b\d{1,2}[/.-]\d{1,2}[/.-]\d{4}\b/;
 const CLINIC_HEADER_ORGANIZATION_PATTERN =
   /\bClinic:\s*([A-Z][A-Za-z.&-]+(?:\s+[A-Z][A-Za-z.&-]+){0,3}\s+Primary\s+Care\s+Associates)\b/g;
+const ITALIAN_CODICE_FISCALE_PATTERN = /\b[A-Z]{6,7}\d{2}[A-EHLMPRST]\d{2}[A-Z]\d{3}[A-Z]\b/gi;
+const ITALIAN_CODICE_FISCALE_LABEL_PATTERN =
+  /\b(?:Codice\s+Fiscale|CF|Tax\s*Code)\s*:\s*([A-Z0-9]{11,20})\b/gi;
 const HIGH_RISK_ENTITY_TYPES = ['US_SSN_FULL', 'MEDICAL_RECORD_NUMBER', 'US_ZIP'];
 const MANDATORY_PREVIEW_ENTITY_CATEGORIES = [
   'US_SSN_FULL',
@@ -161,8 +172,17 @@ const MANDATORY_PREVIEW_ENTITY_CATEGORIES = [
   'ADDRESS',
   'US_ZIP',
 ] as const;
+
+const GDPR_MANDATORY_PREVIEW_ENTITY_CATEGORIES = [
+  'PHONE_NUMBER',
+  'EMAIL_ADDRESS',
+  'ADDRESS',
+  'DATE_TIME',
+  'AGE',
+] as const;
 const DEFAULT_PHI_VALIDATION_STRICT = true;
 const DEFAULT_PHI_VALIDATION_ALLOW_ZIP3 = true;
+const GDPR_PHI_SKIP_PATTERN_TYPES: ReadonlyArray<string> = ['SSN', 'ZIP', 'PHONE', 'IP'] as const;
 const DEFAULT_ANALYSIS_FAILURE_CODE = 'ANALYSIS_FAILED';
 const MAX_ERROR_CODE_LENGTH = 120;
 
@@ -266,9 +286,12 @@ export default class DeIdService {
         const sanitizedFindings = DeIdService.sanitizeSpans(dto.text, deduplicatedFindings);
         const clinicHeaderFindings = DeIdService.extractClinicHeaderOrganizations(dto.text);
         const structuredAddressFindings = DeIdService.extractStructuredAddressFindings(dto.text);
+        const structuredNationalIdFindings = DeIdService.extractStructuredNationalIdFindings(
+          dto.text,
+        );
         const enrichedFindings = DeIdService.mergeFindings(
           DeIdService.mergeFindings(sanitizedFindings, clinicHeaderFindings),
-          structuredAddressFindings,
+          DeIdService.mergeFindings(structuredAddressFindings, structuredNationalIdFindings),
         );
 
         this.logger.log(
@@ -282,7 +305,7 @@ export default class DeIdService {
         );
         const guaranteedFindings = DeIdService.mergeFindings(
           DeIdService.mergeFindings(contextFilteredFindings, clinicHeaderFindings),
-          structuredAddressFindings,
+          DeIdService.mergeFindings(structuredAddressFindings, structuredNationalIdFindings),
         );
 
         this.logger.log(
@@ -379,10 +402,17 @@ export default class DeIdService {
         order: { start: 'ASC' },
       });
 
+      const isGdprFramework =
+        dto.framework === ComplianceFramework.GDPR_EU ||
+        dto.framework === ComplianceFramework.GDPR_UK;
+      const mandatoryCategories = isGdprFramework
+        ? GDPR_MANDATORY_PREVIEW_ENTITY_CATEGORIES
+        : MANDATORY_PREVIEW_ENTITY_CATEGORIES;
+
       const mandatoryEntities = await this.entityManager.find(DetectedEntity, {
         where: {
           jobId: dto.jobId,
-          category: In([...MANDATORY_PREVIEW_ENTITY_CATEGORIES]),
+          category: In([...mandatoryCategories]),
         },
         order: { start: 'ASC' },
       });
@@ -431,7 +461,7 @@ export default class DeIdService {
       }, dto.text);
 
       const normalizedText = normalizeAnonymizedText(anonymizedText);
-      const validationOptions = this.getPhiValidationOptions();
+      const validationOptions = this.getPhiValidationOptions(dto.framework);
       const validationResult = validatePhi(normalizedText, validationOptions);
 
       if (!validationResult.valid) {
@@ -448,7 +478,10 @@ export default class DeIdService {
 
       if (error instanceof PhiLeakDetectedError) {
         this.logger.warn(error.message);
-        throw new UnprocessableEntityException('PHI leak detected after anonymization');
+        const leakTypes = [...new Set(error.leaks.map((l) => l.type))].join(', ');
+        throw new UnprocessableEntityException(
+          `PHI leak detected after anonymization: ${leakTypes}`,
+        );
       }
 
       const message = error instanceof Error ? error.message : String(error);
@@ -457,7 +490,7 @@ export default class DeIdService {
     }
   }
 
-  private getPhiValidationOptions(): ValidationOptions {
+  private getPhiValidationOptions(framework?: ComplianceFramework): ValidationOptions {
     const strictConfig = this.configService.get<string>(
       DE_ID_POST_VALIDATION_ENV.PHI_VALIDATION_STRICT,
     );
@@ -465,9 +498,13 @@ export default class DeIdService {
       DE_ID_POST_VALIDATION_ENV.PHI_VALIDATION_ALLOW_ZIP3,
     );
 
+    const isGdprFramework =
+      framework === ComplianceFramework.GDPR_EU || framework === ComplianceFramework.GDPR_UK;
+
     return {
       strict: strictConfig ? strictConfig === 'true' : DEFAULT_PHI_VALIDATION_STRICT,
       allowZip3: allowZip3Config ? allowZip3Config === 'true' : DEFAULT_PHI_VALIDATION_ALLOW_ZIP3,
+      skipPatternTypes: isGdprFramework ? GDPR_PHI_SKIP_PATTERN_TYPES : undefined,
     };
   }
 
@@ -632,6 +669,13 @@ export default class DeIdService {
         ? operator.params.strict
         : false;
     if (keep === 'year') {
+      const textualMonthYearMatch = value.match(
+        /\b(?:\d{1,2}\s+)?(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{4})\b/i,
+      );
+      if (textualMonthYearMatch) {
+        return `${textualMonthYearMatch[1].toUpperCase()} ${textualMonthYearMatch[2]}`;
+      }
+
       // strict=true only makes sense for strings that actually look like a date
       const looksLikeDate =
         /\b\d{1,2}[/.\s-]\d{1,2}[/.\s-]\d{2,4}\b/.test(value) ||
@@ -668,6 +712,13 @@ export default class DeIdService {
     }
 
     if (keep === 'month_year') {
+      const textualMonthYearMatch = value.match(
+        /\b(?:\d{1,2}\s+)?(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{4})\b/i,
+      );
+      if (textualMonthYearMatch) {
+        return `${textualMonthYearMatch[1].toUpperCase()} ${textualMonthYearMatch[2]}`;
+      }
+
       const monthYearMatch = value.match(/\b\d{1,2}[/.-]\d{4}\b/);
       return monthYearMatch ? monthYearMatch[0] : '[MONTH_YEAR]';
     }
@@ -682,7 +733,9 @@ export default class DeIdService {
 
   private static applyAggregation(value: string, operator: PresidioOperator): string {
     const buckets = DeIdService.getNumberArrayParam(operator, 'buckets');
-    const numericValue = Number.parseInt(value, 10);
+    // Extract the first integer from labeled formats like "(Age: 66)" or "Age: 66"
+    const rawDigits = /\b(\d{1,3})\b/.exec(value);
+    const numericValue = rawDigits ? Number.parseInt(rawDigits[1], 10) : Number.parseInt(value, 10);
 
     if (!Number.isFinite(numericValue) || buckets.length < 2) {
       return '[AGGREGATED]';
@@ -818,7 +871,7 @@ export default class DeIdService {
       threshold,
       analyzableEntities,
       strategy.adHocRecognizers,
-      framework === ComplianceFramework.HIPAA ? HIPAA_ANALYZER_ALLOW_LIST : [],
+      DeIdService.getAnalyzerAllowList(framework),
     );
     const latencyMs = Date.now() - startedAt;
     this.logger.log(
@@ -826,6 +879,18 @@ export default class DeIdService {
     );
 
     return findings;
+  }
+
+  private static getAnalyzerAllowList(framework: ComplianceFramework): string[] {
+    if (framework === ComplianceFramework.HIPAA) {
+      return HIPAA_ANALYZER_ALLOW_LIST;
+    }
+
+    if (framework === ComplianceFramework.GDPR_EU) {
+      return GDPR_EU_ANALYZER_ALLOW_LIST;
+    }
+
+    return [];
   }
 
   private static getRemoteNlpEntities(
@@ -948,6 +1013,39 @@ export default class DeIdService {
         } satisfies AnalyzerFinding;
       })
       .filter((finding): finding is AnalyzerFinding => finding !== null);
+  }
+
+  private static extractStructuredNationalIdFindings(text: string): AnalyzerFinding[] {
+    const labelPattern = new RegExp(ITALIAN_CODICE_FISCALE_LABEL_PATTERN.source, 'gi');
+    const codiceFiscalePattern = new RegExp(ITALIAN_CODICE_FISCALE_PATTERN.source, 'gi');
+
+    const labeledFindings = Array.from(text.matchAll(labelPattern)).map((match) => {
+      const matchedValue = match[1] ?? '';
+      const fullMatch = match[0];
+      const fullMatchStart = match.index ?? 0;
+      const start = fullMatchStart + fullMatch.lastIndexOf(matchedValue);
+
+      return {
+        entity_type: 'NATIONAL_ID',
+        start,
+        end: start + matchedValue.length,
+        score: 0.99,
+      } satisfies AnalyzerFinding;
+    });
+
+    const strictPatternFindings = Array.from(text.matchAll(codiceFiscalePattern)).map((match) => {
+      const matchedValue = match[0];
+      const start = match.index ?? 0;
+
+      return {
+        entity_type: 'NATIONAL_ID',
+        start,
+        end: start + matchedValue.length,
+        score: 0.99,
+      } satisfies AnalyzerFinding;
+    });
+
+    return DeIdService.mergeFindings(labeledFindings, strictPatternFindings);
   }
 
   private static clampEndToFieldMarker(text: string, start: number, end: number): number {
@@ -1127,9 +1225,22 @@ export default class DeIdService {
         return true;
       }
 
+      if (
+        finding.entity_type === 'DATE_TIME' &&
+        DATE_TIME_CONTEXT_KEYWORDS.some((kw) => context.includes(kw))
+      ) {
+        return true;
+      }
+
       // Skip if text is in Allow List
       if (isInMedicalAllowlist(foundText)) {
         this.logger.debug(`Filtered: "${foundText}" is in medical allowlist`);
+        return false;
+      }
+
+      // Filter ICD-10 diagnosis codes (e.g. E03.9, J18.0) — not PHI
+      if (/^[a-z]\d{2}(?:\.\d{1,4})?$/.test(foundText)) {
+        this.logger.debug(`Filtered: "${foundText}" matches ICD-10 code pattern`);
         return false;
       }
 
@@ -1159,7 +1270,8 @@ export default class DeIdService {
           .substring(Math.max(0, finding.start - 120), Math.min(text.length, finding.end + 120))
           .toLowerCase();
         const hasStreetPattern =
-          /\b\d+\s+\w+\s+(?:st|ave|blvd|dr|rd|ln|way|pl|street|avenue)\b/i.test(wideContext);
+          /\b\d+\s+\w+\s+(?:st|ave|blvd|dr|rd|ln|way|pl|street|avenue)\b/i.test(wideContext) ||
+          /\b(?:via|corso|piazza|viale|vicolo|largo|strada)\s+[a-z]/i.test(wideContext);
         if (hasStreetPattern) {
           // If there is a street in the context — forcibly consider it as ADDRESS (high risk)
           return true;

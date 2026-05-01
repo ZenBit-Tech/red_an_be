@@ -144,6 +144,8 @@ const GDPR_EU_STRATEGY: ComplianceStrategy = {
     AGE: createEntityStrategy([
       { type: 'aggregate', params: { buckets: [0, 18, 30, 50, 70, 100] } },
     ]),
+    GENDER: createEntityStrategy([{ type: 'redact' }], { riskLevel: 'medium' }),
+    ADDRESS: createEntityStrategy([{ type: 'redact' }], { riskLevel: 'high' }),
     ORGANIZATION: createEntityStrategy([{ type: 'mask' }, { type: 'hash' }]),
     NATIONAL_ID: createEntityStrategy([{ type: 'hash' }, { type: 'redact' }]),
     PASSPORT: createEntityStrategy([{ type: 'hash' }, { type: 'redact' }]),

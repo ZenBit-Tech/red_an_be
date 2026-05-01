@@ -133,6 +133,7 @@ describe('DeIdService', () => {
     expect(presidioClientMock.analyze).toHaveBeenCalledTimes(2);
     expect(presidioClientMock.analyze.mock.calls[0][2]).toContain('PERSON');
     expect(presidioClientMock.analyze.mock.calls[0][2]).toContain('AGE');
+    expect(presidioClientMock.analyze.mock.calls[0][2]).toContain('DATE_TIME');
     // IMAGE always excluded (requires separate Image Redactor API)
     expect(presidioClientMock.analyze.mock.calls[0][2]).not.toContain('IMAGE');
     // Clinical NLP flag off by default → FREE_TEXT and HEALTH_DATA excluded
@@ -205,6 +206,10 @@ describe('DeIdService', () => {
           score: 0.92,
           regex: '\\b[A-Z][A-Za-z]+(?:\\s+[A-Za-z]+){0,3}\\s+Primary\\s+Care(?:\\s+Associates)?\\b',
         }),
+        expect.objectContaining({
+          name: 'policlinico_university_connector_pattern',
+          score: 0.9,
+        }),
       ]),
     );
   });
@@ -250,6 +255,167 @@ describe('DeIdService', () => {
 
     expect(adHocRecognizers).toEqual(
       expect.arrayContaining([expect.objectContaining({ name: 'Clinic Organization Recognizer' })]),
+    );
+  });
+
+  it('should include gender recognizer and GENDER entity only for GDPR_EU analysis', async () => {
+    const tm: TransactionManagerMock = {
+      create: jest.fn((target: unknown, payload: Record<string, unknown>) => {
+        if (target === DeIdJob) {
+          return {
+            id: 'job-gdpr-eu-gender-recognizer',
+            framework: payload.framework,
+            threshold: payload.threshold,
+            preserveStructure: payload.preserveStructure,
+            sourceTextHash: payload.sourceTextHash,
+            sourceTextLength: payload.sourceTextLength,
+          };
+        }
+
+        return {
+          id: 'entity-id',
+          ...payload,
+        };
+      }),
+      save: jest.fn(async (value: unknown) => value),
+    };
+
+    entityManagerMock.transaction.mockImplementation(
+      async (callback: (tx: TransactionManagerMock) => unknown) => callback(tm),
+    );
+
+    presidioClientMock.analyze.mockResolvedValue([] satisfies AnalyzerFinding[]);
+
+    await service.analyzeText({
+      text: 'Gender: Female',
+      framework: ComplianceFramework.GDPR_EU,
+      threshold: 0.85,
+      preserveStructure: false,
+    });
+
+    const entityTypes = presidioClientMock.analyze.mock.calls[0][2] as string[];
+    const adHocRecognizers = presidioClientMock.analyze.mock.calls[0][3] as Array<{
+      name: string;
+      deny_list?: string[];
+      patterns?: Array<{ name: string; regex: string; score: number }>;
+    }>;
+
+    const genderAdHocRecognizer = adHocRecognizers.find(
+      (recognizer) => recognizer.name === 'Gender Recognizer',
+    );
+
+    expect(entityTypes).toEqual(expect.arrayContaining(['GENDER']));
+    expect(genderAdHocRecognizer).toEqual(
+      expect.objectContaining({
+        deny_list: ['Male', 'Female', 'Non-binary', 'Other'],
+        patterns: expect.arrayContaining([
+          expect.objectContaining({
+            name: 'Gender label format',
+            regex: '\\b(?:Gender|Sex):\\s*(?:Male|Female|Non-binary|Other)\\b',
+            score: 0.9,
+          }),
+        ]),
+      }),
+    );
+  });
+
+  it('should pass GDPR_EU analyzer allow-list with clinical scales to Presidio', async () => {
+    const tm: TransactionManagerMock = {
+      create: jest.fn((target: unknown, payload: Record<string, unknown>) => {
+        if (target === DeIdJob) {
+          return {
+            id: 'job-gdpr-eu-allow-list',
+            framework: payload.framework,
+            threshold: payload.threshold,
+            preserveStructure: payload.preserveStructure,
+            sourceTextHash: payload.sourceTextHash,
+            sourceTextLength: payload.sourceTextLength,
+          };
+        }
+
+        return {
+          id: 'entity-id',
+          ...payload,
+        };
+      }),
+      save: jest.fn(async (value: unknown) => value),
+    };
+
+    entityManagerMock.transaction.mockImplementation(
+      async (callback: (tx: TransactionManagerMock) => unknown) => callback(tm),
+    );
+
+    presidioClientMock.analyze.mockResolvedValue([] satisfies AnalyzerFinding[]);
+
+    await service.analyzeText({
+      text: 'PHQ-9 score is 12 and GAD-7 score is 9',
+      framework: ComplianceFramework.GDPR_EU,
+      threshold: 0.85,
+      preserveStructure: false,
+    });
+
+    const allowList = presidioClientMock.analyze.mock.calls[0][4] as string[];
+
+    expect(allowList).toEqual(
+      expect.arrayContaining(['PHQ-9', 'PHQ-2', 'GAD-7', 'GAD-2', 'HAM-A', 'HDRS']),
+    );
+  });
+
+  it('should include clinical date recognizer in GDPR_EU ad-hoc recognizers', async () => {
+    const tm: TransactionManagerMock = {
+      create: jest.fn((target: unknown, payload: Record<string, unknown>) => {
+        if (target === DeIdJob) {
+          return {
+            id: 'job-gdpr-eu-date-recognizer',
+            framework: payload.framework,
+            threshold: payload.threshold,
+            preserveStructure: payload.preserveStructure,
+            sourceTextHash: payload.sourceTextHash,
+            sourceTextLength: payload.sourceTextLength,
+          };
+        }
+
+        return {
+          id: 'entity-id',
+          ...payload,
+        };
+      }),
+      save: jest.fn(async (value: unknown) => value),
+    };
+
+    entityManagerMock.transaction.mockImplementation(
+      async (callback: (tx: TransactionManagerMock) => unknown) => callback(tm),
+    );
+
+    presidioClientMock.analyze.mockResolvedValue([] satisfies AnalyzerFinding[]);
+
+    await service.analyzeText({
+      text: 'Consultation Date: 08 April 2026',
+      framework: ComplianceFramework.GDPR_EU,
+      threshold: 0.85,
+      preserveStructure: false,
+    });
+
+    const adHocRecognizers = presidioClientMock.analyze.mock.calls[0][3] as Array<{
+      name: string;
+      patterns?: Array<{ name: string; regex: string; score: number }>;
+      supported_entity?: string;
+    }>;
+
+    const clinicalDateAdHocRecognizer = adHocRecognizers.find(
+      (recognizer) => recognizer.name === 'Clinical Date Recognizer',
+    );
+
+    expect(clinicalDateAdHocRecognizer).toEqual(
+      expect.objectContaining({
+        supported_entity: 'DATE_TIME',
+        patterns: expect.arrayContaining([
+          expect.objectContaining({
+            name: 'day_month_name_year',
+            score: 0.95,
+          }),
+        ]),
+      }),
     );
   });
 
@@ -307,6 +473,115 @@ describe('DeIdService', () => {
       sampleRegex.test(
         'Outpatient Progress Note  Clinic:   Vasquez Primary Care Associates, Chicago, IL',
       ),
+    ).toBe(true);
+  });
+
+  it('should extract italian codice fiscale as NATIONAL_ID when analyzer misses it', async () => {
+    const tm: TransactionManagerMock = {
+      create: jest.fn((target: unknown, payload: Record<string, unknown>) => {
+        if (target === DeIdJob) {
+          return {
+            id: 'job-cf-fallback',
+            framework: payload.framework,
+            threshold: payload.threshold,
+            preserveStructure: payload.preserveStructure,
+            sourceTextHash: payload.sourceTextHash,
+            sourceTextLength: payload.sourceTextLength,
+          };
+        }
+
+        return {
+          id: 'entity-id',
+          ...payload,
+        };
+      }),
+      save: jest.fn(async (value: unknown) => value),
+    };
+
+    entityManagerMock.transaction.mockImplementation(
+      async (callback: (tx: TransactionManagerMock) => unknown) => callback(tm),
+    );
+
+    // Simulate analyzer miss to validate structured fallback extraction
+    presidioClientMock.analyze.mockResolvedValue([] satisfies AnalyzerFinding[]);
+
+    const text = 'Codice Fiscale: SPSEMRC85T18H501Z';
+    const result = await service.analyzeText({
+      text,
+      framework: ComplianceFramework.GDPR_EU,
+      threshold: 0.85,
+      preserveStructure: false,
+    });
+
+    const nationalIdFinding = result.findings.find((finding) => finding.category === 'NATIONAL_ID');
+
+    expect(nationalIdFinding).toBeDefined();
+    expect(text.slice(nationalIdFinding?.start ?? 0, nationalIdFinding?.end ?? 0)).toBe(
+      'SPSEMRC85T18H501Z',
+    );
+  });
+
+  it('should match policlinico organization samples with connector variants', async () => {
+    const tm: TransactionManagerMock = {
+      create: jest.fn((target: unknown, payload: Record<string, unknown>) => {
+        if (target === DeIdJob) {
+          return {
+            id: 'job-policlinico-pattern',
+            framework: payload.framework,
+            threshold: payload.threshold,
+            preserveStructure: payload.preserveStructure,
+            sourceTextHash: payload.sourceTextHash,
+            sourceTextLength: payload.sourceTextLength,
+          };
+        }
+
+        return {
+          id: 'entity-id',
+          ...payload,
+        };
+      }),
+      save: jest.fn(async (value: unknown) => value),
+    };
+
+    entityManagerMock.transaction.mockImplementation(
+      async (callback: (tx: TransactionManagerMock) => unknown) => callback(tm),
+    );
+
+    presidioClientMock.analyze.mockResolvedValue([] satisfies AnalyzerFinding[]);
+
+    await service.analyzeText({
+      text: 'Referral sent to Policlinico Gemelli - Catholic University of Rome',
+      framework: ComplianceFramework.HIPAA,
+      threshold: 0.5,
+      preserveStructure: false,
+    });
+
+    const adHocRecognizers = presidioClientMock.analyze.mock.calls[0][3] as Array<{
+      name: string;
+      patterns?: Array<{ name: string; regex: string }>;
+    }>;
+
+    const clinicRecognizer = adHocRecognizers.find(
+      (recognizer) => recognizer.name === 'Clinic Organization Recognizer',
+    );
+
+    const policlinicoPattern = clinicRecognizer?.patterns?.find(
+      (pattern) => pattern.name === 'policlinico_university_connector_pattern',
+    );
+
+    expect(policlinicoPattern).toBeDefined();
+    const sampleRegex = new RegExp(policlinicoPattern?.regex ?? '', 'g');
+
+    expect(
+      sampleRegex.test('Referral sent to Policlinico Gemelli - Catholic University of Rome'),
+    ).toBe(true);
+    sampleRegex.lastIndex = 0;
+    expect(
+      sampleRegex.test('Referral sent to Policlinico Gemelli – Catholic University of Rome'),
+    ).toBe(true);
+    sampleRegex.lastIndex = 0;
+    expect(
+      sampleRegex.test('Referral sent to Policlinico Gemelli, Catholic University of Rome'),
     ).toBe(true);
   });
 
@@ -460,6 +735,44 @@ describe('DeIdService', () => {
     });
 
     expect(preview).toBe('[REDACT] met 2020');
+  });
+
+  it('should generalize consultation full date to month and year in GDPR_EU preview', async () => {
+    const text = 'Consultation Date: 08 April 2026';
+    const hash = createHash('sha256').update(text).digest('hex');
+
+    const dateStart = text.indexOf('08 April 2026');
+    const dateEnd = dateStart + '08 April 2026'.length;
+
+    entityManagerMock.findOne.mockResolvedValue({
+      id: 'job-consultation-month-year',
+      framework: ComplianceFramework.GDPR_EU,
+      sourceTextHash: hash,
+      sourceTextLength: text.length,
+    } satisfies Partial<DeIdJob>);
+
+    entityManagerMock.find
+      .mockResolvedValueOnce([] satisfies Partial<DetectedEntity>[]) // activeEntities
+      .mockResolvedValueOnce([
+        {
+          id: 'e-consultation-date',
+          jobId: 'job-consultation-month-year',
+          category: 'DATE_TIME',
+          confidence: 94,
+          start: dateStart,
+          end: dateEnd,
+          proxyType: 'Generalization',
+        },
+      ] satisfies Partial<DetectedEntity>[]);
+
+    const preview = await service.getPreview({
+      jobId: 'job-consultation-month-year',
+      text,
+      framework: ComplianceFramework.GDPR_EU,
+      activeIds: [],
+    });
+
+    expect(preview).toBe('Consultation Date: APRIL 2026');
   });
 
   it('should wrap unexpected preview failures with internal error', async () => {
@@ -1501,6 +1814,40 @@ describe('DeIdService', () => {
       expect(result.findings[0].category).toBe('DATE_TIME');
       expect(result.findings[0].start).toBe(17);
       expect(result.findings[0].end).toBe(27);
+    });
+
+    it('should keep DATE_TIME in consultation date context', async () => {
+      const tm: TransactionManagerMock = {
+        create: jest.fn((target: unknown, payload: Record<string, unknown>) => ({
+          id: 'job-consultation-date-context',
+          ...payload,
+        })),
+        save: jest.fn((entity: unknown) => {
+          if (Array.isArray(entity)) return Promise.resolve(entity);
+          return Promise.resolve(entity);
+        }),
+      };
+
+      entityManagerMock.transaction.mockImplementation(
+        async (callback: (tx: TransactionManagerMock) => unknown) => callback(tm),
+      );
+
+      const text = 'Consultation Date: 2026. Physical Exam: BP 120/80';
+      presidioClientMock.analyze.mockResolvedValue([
+        { entity_type: 'DATE_TIME', start: 19, end: 23, score: 0.55 },
+      ] satisfies AnalyzerFinding[]);
+
+      const result = await service.analyzeText({
+        text,
+        framework: ComplianceFramework.GDPR_EU,
+        threshold: 0.5,
+        preserveStructure: false,
+      });
+
+      expect(result.findings).toHaveLength(1);
+      expect(result.findings[0].category).toBe('DATE_TIME');
+      expect(result.findings[0].start).toBe(19);
+      expect(result.findings[0].end).toBe(23);
     });
 
     it('should NOT filter high-risk entities (SSN, MRN) even in medication context', async () => {
