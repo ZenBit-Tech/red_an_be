@@ -133,14 +133,13 @@ const GDPR_EU_STRATEGY: ComplianceStrategy = {
       { type: 'mask', params: { chars: 6 } },
     ]),
     PHONE_NUMBER: createEntityStrategy([{ type: 'mask', params: { chars: 6 } }, { type: 'hash' }]),
+    PL_PHONE_NUMBER: createEntityStrategy([{ type: 'mask', params: { keepFirst: 8 } }]),
     LOCATION: createEntityStrategy([
       { type: 'generalize', params: { level: 'city' } },
       { type: 'generalize', params: { level: 'region' } },
     ]),
-    DATE_TIME: createEntityStrategy([
-      { type: 'generalize', params: { keep: 'year' } },
-      { type: 'generalize', params: { keep: 'month_year' } },
-    ]),
+    DATE_TIME: createEntityStrategy([{ type: 'generalize', params: { keep: 'month_year' } }]),
+    DATE_OF_BIRTH: createEntityStrategy([{ type: 'generalize', params: { keep: 'year' } }]),
     AGE: createEntityStrategy([
       { type: 'aggregate', params: { buckets: [0, 18, 30, 50, 70, 100] } },
     ]),

@@ -959,7 +959,7 @@ describe('DeIdService', () => {
     expect(preview).toBe('Consultation Date: APRIL 2026');
   });
 
-  it('should generalize dotted DOB date in GDPR_EU preview when DATE_TIME is present', async () => {
+  it('should generalize dotted DOB date in GDPR_EU preview when DATE_OF_BIRTH is present', async () => {
     const text = 'Date of Birth: 18.12.1985 Age: 34';
     const hash = createHash('sha256').update(text).digest('hex');
 
@@ -975,9 +975,9 @@ describe('DeIdService', () => {
 
     entityManagerMock.find.mockResolvedValue([
       {
-        id: 'e-dob-date',
+        id: 'e-dob',
         jobId: 'job-gdpr-dotted-dob-preview',
-        category: 'DATE_TIME',
+        category: 'DATE_OF_BIRTH',
         confidence: 96,
         start: dobStart,
         end: dobStart + '18.12.1985'.length,
@@ -998,7 +998,7 @@ describe('DeIdService', () => {
       jobId: 'job-gdpr-dotted-dob-preview',
       text,
       framework: ComplianceFramework.GDPR_EU,
-      activeIds: ['e-dob-date', 'e-age'],
+      activeIds: ['e-dob', 'e-age'],
     });
 
     expect(preview).toBe('Date of Birth: 1985 Age: [30-49]');
@@ -1186,7 +1186,7 @@ describe('DeIdService', () => {
     );
   });
 
-  it('should add structured DATE_TIME finding from Date of Birth when analyzer misses dotted date', async () => {
+  it('should add structured DATE_OF_BIRTH finding from Date of Birth when analyzer misses dotted date', async () => {
     const tm: TransactionManagerMock = {
       create: jest.fn((target: unknown, payload: Record<string, unknown>) => {
         if (target === DeIdJob) {
@@ -1224,7 +1224,8 @@ describe('DeIdService', () => {
 
     const dobFinding = result.findings.find(
       (finding) =>
-        finding.category === 'DATE_TIME' && text.slice(finding.start, finding.end) === '18.12.1985',
+        finding.category === 'DATE_OF_BIRTH' &&
+        text.slice(finding.start, finding.end) === '18.12.1985',
     );
 
     expect(dobFinding).toBeDefined();

@@ -101,6 +101,8 @@ const DATE_TIME_CONTEXT_KEYWORDS = [
   'appointment',
   'discharge',
   'admission',
+  'issue',
+  'issued',
 ];
 const STRUCTURED_FIELD_LABELS = [
   'Clinic',
@@ -171,6 +173,8 @@ const GERMAN_KV_NUMBER_PATTERN = /\b[A-Z]\d{9}\b/gi;
 const GERMAN_KV_NUMBER_LABEL_PATTERN =
   /\b(?:KV(?:-?Nr\.?|\s*No\.?)|Krankenversichertennummer|Versichertennummer|Insurance\s*No\.?)\s*:\s*([A-Z]\d{9})\b/gi;
 const STRUCTURED_DOB_LABEL_PATTERN = /\b(?:DOB|Date\s+of\s+Birth)\s*:\s*/gi;
+const STRUCTURED_ISSUE_DATE_LABEL_PATTERN =
+  /\b(?:Date\s+of\s+Issue|Issue\s+Date|Issued(?:\s+on)?)\s*:\s*/gi;
 const STRUCTURED_DOB_VALUE_PREFIX_PATTERN =
   /^\s*(?:\d{1,2}[./-]\d{1,2}[./-]\d{2,4}|(?:\d{1,2}\s+)?(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{4}|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2},?\s+\d{4})\b/i;
 const TEXTUAL_MONTH_PATTERN =
@@ -206,11 +210,13 @@ const MANDATORY_PREVIEW_ENTITY_CATEGORIES = [
 
 const GDPR_MANDATORY_PREVIEW_ENTITY_CATEGORIES = [
   'PHONE_NUMBER',
+  'PL_PHONE_NUMBER',
   'EMAIL_ADDRESS',
   'ADDRESS',
   'NATIONAL_ID',
   'ORGANIZATION',
   'DATE_TIME',
+  'DATE_OF_BIRTH',
   'AGE',
 ] as const;
 const DEFAULT_PHI_VALIDATION_STRICT = true;
@@ -320,6 +326,9 @@ export default class DeIdService {
         const clinicHeaderFindings = DeIdService.extractClinicHeaderOrganizations(dto.text);
         const structuredAddressFindings = DeIdService.extractStructuredAddressFindings(dto.text);
         const structuredDobFindings = DeIdService.extractStructuredDobFindings(dto.text);
+        const structuredIssueDateFindings = DeIdService.extractStructuredIssueDateFindings(
+          dto.text,
+        );
         const structuredNationalIdFindings = DeIdService.extractStructuredNationalIdFindings(
           dto.text,
         );
@@ -327,7 +336,7 @@ export default class DeIdService {
           DeIdService.mergeFindings(sanitizedFindings, clinicHeaderFindings),
           DeIdService.mergeFindings(
             DeIdService.mergeFindings(structuredAddressFindings, structuredDobFindings),
-            structuredNationalIdFindings,
+            DeIdService.mergeFindings(structuredIssueDateFindings, structuredNationalIdFindings),
           ),
         );
 
@@ -344,7 +353,7 @@ export default class DeIdService {
           DeIdService.mergeFindings(contextFilteredFindings, clinicHeaderFindings),
           DeIdService.mergeFindings(
             DeIdService.mergeFindings(structuredAddressFindings, structuredDobFindings),
-            structuredNationalIdFindings,
+            DeIdService.mergeFindings(structuredIssueDateFindings, structuredNationalIdFindings),
           ),
         );
 
@@ -680,6 +689,13 @@ export default class DeIdService {
   }
 
   private static applyMask(value: string, operator: PresidioOperator): string {
+    const keepFirst = DeIdService.getNumberParam(operator, 'keepFirst');
+
+    if (keepFirst !== undefined) {
+      const prefix = value.slice(0, keepFirst);
+      return `${prefix}[REDACT]`;
+    }
+
     const charsToMask = DeIdService.getNumberParam(operator, 'chars') ?? value.length;
     const keepLast = DeIdService.getNumberParam(operator, 'keepLast') ?? 0;
 
@@ -1063,6 +1079,41 @@ export default class DeIdService {
 
   private static extractStructuredDobFindings(text: string): AnalyzerFinding[] {
     return Array.from(text.matchAll(STRUCTURED_DOB_LABEL_PATTERN))
+      .map((match) => {
+        if (match.index === undefined) {
+          return null;
+        }
+
+        const valueStart = match.index + match[0].length;
+        const tail = text.slice(valueStart);
+        const valueMatch = tail.match(STRUCTURED_DOB_VALUE_PREFIX_PATTERN);
+
+        if (!valueMatch) {
+          return null;
+        }
+
+        const rawValue = valueMatch[0];
+        const leadingWhitespaceLength = rawValue.match(/^\s*/)?.[0].length ?? 0;
+        const trailingWhitespaceLength = rawValue.match(/\s*$/)?.[0].length ?? 0;
+        const normalizedStart = valueStart + leadingWhitespaceLength;
+        const normalizedEnd = valueStart + rawValue.length - trailingWhitespaceLength;
+
+        if (normalizedEnd <= normalizedStart) {
+          return null;
+        }
+
+        return {
+          entity_type: 'DATE_OF_BIRTH',
+          start: normalizedStart,
+          end: normalizedEnd,
+          score: 0.99,
+        } satisfies AnalyzerFinding;
+      })
+      .filter((finding): finding is AnalyzerFinding => finding !== null);
+  }
+
+  private static extractStructuredIssueDateFindings(text: string): AnalyzerFinding[] {
+    return Array.from(text.matchAll(new RegExp(STRUCTURED_ISSUE_DATE_LABEL_PATTERN.source, 'gi')))
       .map((match) => {
         if (match.index === undefined) {
           return null;

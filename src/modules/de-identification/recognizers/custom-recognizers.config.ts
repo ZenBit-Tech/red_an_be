@@ -47,10 +47,20 @@ export const GDPR_EU_ANALYZER_ALLOW_LIST: string[] = [
   'MoCA',
   'CAGE',
   'AUDIT',
+  'Spirometry',
+  'ECG',
+  'EKG',
   'Gastroscopy',
   'Colonoscopy',
   'MRI',
   'CT',
+  'mmol/L',
+  'mg/dL',
+  'mmHg',
+  'U/L',
+  'IU/L',
+  'ng/mL',
+  'micromol/L',
 ];
 
 // ---------------------------------------------------------------------------
@@ -110,7 +120,7 @@ export const MEDICAL_ALLOWLIST: Record<string, string[]> = {
     'CAGE',
     'AUDIT',
   ],
-  procedures: ['gastroscopy', 'colonoscopy', 'mri', 'ct'],
+  procedures: ['gastroscopy', 'colonoscopy', 'mri', 'ct', 'spirometry', 'ecg', 'ekg'],
 };
 
 /**
@@ -420,12 +430,6 @@ const biologicalDataRecognizer: CustomRecognizer = {
       name: 'ICD-10 code',
       regex: '\\b[A-Z][0-9]{2}(?:\\.[0-9]{1,4})?\\b',
       score: 0.7,
-    },
-    {
-      name: 'Lab result value',
-      regex:
-        '\\b\\d+(?:\\.\\d+)?\\s*(?:mg\\/(?:dL|L)|mmol\\/L|micromol\\/L|ng\\/mL|U\\/L|IU\\/L)\\b',
-      score: 0.8,
     },
   ],
   context: ['blood', 'lab', 'test', 'result', 'diagnosis', 'condition', 'medical', 'specimen'],
@@ -745,7 +749,76 @@ const clinicalDateRecognizer: CustomRecognizer = {
       score: 0.92,
     },
   ],
-  context: ['date', 'consultation', 'visit', 'appointment', 'admission', 'discharge', 'issue'],
+  context: [
+    'date',
+    'consultation',
+    'visit',
+    'appointment',
+    'admission',
+    'discharge',
+    'issue',
+    'issued',
+    'document',
+    'report',
+    'of issue',
+  ],
+};
+
+// ---------------------------------------------------------------------------
+// GDPR EU – Polish healthcare facility recognizer
+// ---------------------------------------------------------------------------
+
+const polishHealthcareFacilityRecognizer: CustomRecognizer = {
+  name: 'Polish Healthcare Facility Recognizer',
+  supported_language: 'en',
+  supported_entity: 'ORGANIZATION',
+  patterns: [
+    {
+      name: 'central_clinical_hospital_warsaw',
+      regex: '\\bCentral\\s+Clinical\\s+Hospital(?:\\s+of\\s+(?:the\\s+)?[A-Z][A-Za-z\\s]+)?\\b',
+      score: 0.98,
+    },
+    {
+      name: 'healthcare_facility_of_university',
+      regex:
+        '\\b[A-Z][A-Za-z\\s]+(?:Hospital|Clinic|Centre|Center)\\s+of\\s+(?:the\\s+)?(?:[A-Z][A-Za-z]+\\s+){1,4}(?:University|Medical|Institute)(?:\\s+of\\s+[A-Z][A-Za-z]+(?:\\s+[A-Za-z]+)*)?\\b',
+      score: 0.93,
+    },
+    {
+      name: 'polish_hospital_or_clinic_prefix',
+      regex: '\\b(?:Szpital|Klinika|Centrum\\s+Medyczne|Instytut)(?:\\s+[A-Z][A-Za-z]+){1,5}\\b',
+      score: 0.9,
+    },
+    {
+      name: 'uck_wum_abbreviation',
+      regex: '\\b(?:UCK\\s+WUM|UCK|WUM)\\b',
+      score: 0.97,
+    },
+  ],
+  context: ['hospital', 'clinic', 'facility', 'medical', 'healthcare', 'university', 'warsaw'],
+};
+
+// ---------------------------------------------------------------------------
+// GDPR EU – Polish phone number recognizer (+48 XXX XXX XXX)
+// ---------------------------------------------------------------------------
+
+const polishPhoneRecognizer: CustomRecognizer = {
+  name: 'Polish Phone Number Recognizer',
+  supported_language: 'en',
+  supported_entity: 'PL_PHONE_NUMBER',
+  patterns: [
+    {
+      name: 'pl_phone_with_country_code',
+      regex: '\\+48[\\s-]?\\d{3}[\\s-]?\\d{3}[\\s-]?\\d{3}\\b',
+      score: 0.97,
+    },
+    {
+      name: 'pl_phone_local_9_digits',
+      regex: '\\b0?\\d{3}[\\s-]\\d{3}[\\s-]\\d{3}\\b',
+      score: 0.75,
+    },
+  ],
+  context: ['phone', 'tel', 'contact', 'mobile', 'number', 'call', 'telephone'],
 };
 
 // ---------------------------------------------------------------------------
@@ -777,6 +850,8 @@ export const GDPR_EU_CUSTOM_RECOGNIZERS: CustomRecognizer[] = [
   genderRecognizer,
   clinicOrganizationRecognizer,
   italianAddressRecognizer,
+  polishHealthcareFacilityRecognizer,
+  polishPhoneRecognizer,
 ];
 
 export const GDPR_UK_CUSTOM_RECOGNIZERS: CustomRecognizer[] = [
