@@ -146,7 +146,7 @@ const GDPR_EU_STRATEGY: ComplianceStrategy = {
     ]),
     GENDER: createEntityStrategy([{ type: 'redact' }], { riskLevel: 'medium' }),
     ADDRESS: createEntityStrategy([{ type: 'redact' }], { riskLevel: 'high' }),
-    ORGANIZATION: createEntityStrategy([{ type: 'mask' }, { type: 'hash' }]),
+    ORGANIZATION: createEntityStrategy([{ type: 'redact' }], { riskLevel: 'high' }),
     NATIONAL_ID: createEntityStrategy([{ type: 'hash' }, { type: 'redact' }]),
     PASSPORT: createEntityStrategy([{ type: 'hash' }, { type: 'redact' }]),
     CREDIT_CARD: createEntityStrategy([{ type: 'mask', params: { keepLast: 4 } }]),

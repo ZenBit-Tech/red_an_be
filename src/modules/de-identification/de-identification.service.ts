@@ -116,6 +116,7 @@ const STRUCTURED_FIELD_LABELS = [
   'Sex',
   'Address',
   'Phone',
+  'Contact',
   'Chief Complaint',
   'History of Present Illness',
   'Past Medical History',
@@ -148,22 +149,52 @@ const SOFT_BOUNDARY_FIELD_LABELS = [
   'Sex',
   'Address',
   'Phone',
+  'Contact',
 ] as const;
 const FIELD_LABEL_SOFT_BOUNDARY_PATTERN = new RegExp(
   `\\s+(?:${SOFT_BOUNDARY_FIELD_LABELS.join('|')})\\b:?`,
   'i',
 );
 const GENDER_TAIL_BOUNDARY_PATTERN =
-  /^(?:Address|Phone|DOB|Date of Birth|SSN|MRN|Provider|Patient Name)\b:?/i;
+  /^(?:Address|Phone|Contact|DOB|Date of Birth|SSN|MRN|Provider|Patient Name)\b:?/i;
 const NON_PHI_GENDER_VALUE_PATTERN = /^(?:male|female|other|unknown|non-binary|nonbinary|m|f)$/i;
 const ORGANIZATION_ENTITY_TYPE = 'ORGANIZATION';
 const ABSOLUTE_DATE_PATTERN = /\b\d{1,2}[/.-]\d{1,2}[/.-]\d{4}\b/;
 const CLINIC_HEADER_ORGANIZATION_PATTERN =
   /\bClinic:\s*([A-Z][A-Za-z.&-]+(?:\s+[A-Z][A-Za-z.&-]+){0,3}\s+Primary\s+Care\s+Associates)\b/g;
+const HIGH_RISK_FACILITY_ORGANIZATION_PATTERN =
+  /\b((?:Charit(?:e|\u00e9)\s*(?:–|-|,)\s*Universit(?:aets|ats|\u00e4ts)?medizin\s+[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,2})|(?:Charit(?:e|\u00e9)\b(?!\s*(?:–|-|,)\s*Universit(?:aets|ats|\u00e4ts)?medizin\b))|(?:Universit(?:aets|ats|\u00e4ts)?medizin\s+[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,2})|(?:Klinikum\s+[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3})|(?:Krankenhaus\s+[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3}))\b/gi;
 const ITALIAN_CODICE_FISCALE_PATTERN = /\b[A-Z]{6,7}\d{2}[A-EHLMPRST]\d{2}[A-Z]\d{3}[A-Z]\b/gi;
 const ITALIAN_CODICE_FISCALE_LABEL_PATTERN =
   /\b(?:Codice\s+Fiscale|CF|Tax\s*Code)\s*:\s*([A-Z0-9]{11,20})\b/gi;
-const HIGH_RISK_ENTITY_TYPES = ['US_SSN_FULL', 'MEDICAL_RECORD_NUMBER', 'US_ZIP'];
+const GERMAN_KV_NUMBER_PATTERN = /\b[A-Z]\d{9}\b/gi;
+const GERMAN_KV_NUMBER_LABEL_PATTERN =
+  /\b(?:KV(?:-?Nr\.?|\s*No\.?)|Krankenversichertennummer|Versichertennummer|Insurance\s*No\.?)\s*:\s*([A-Z]\d{9})\b/gi;
+const STRUCTURED_DOB_LABEL_PATTERN = /\b(?:DOB|Date\s+of\s+Birth)\s*:\s*/gi;
+const STRUCTURED_DOB_VALUE_PREFIX_PATTERN =
+  /^\s*(?:\d{1,2}[./-]\d{1,2}[./-]\d{2,4}|(?:\d{1,2}\s+)?(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{4}|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2},?\s+\d{4})\b/i;
+const TEXTUAL_MONTH_PATTERN =
+  /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/i;
+const STRICT_DATE_TOKEN_PATTERN =
+  /^\s*(?:\d{1,2}[/. -]\d{1,2}(?:[/. -]\d{2,4})?|\d{1,2}[/. -]\d{4})\s*$/;
+const PHONE_LIKE_VALUE_PATTERN = /^\s*\+?\d(?:[\d\s().-]{5,}\d)?\s*$/;
+const PHONE_CONTEXT_KEYWORDS = ['phone', 'contact', 'tel', 'mobile', 'cell', 'fax'] as const;
+const PREVIEW_CATEGORY_PRIORITY: Readonly<Record<string, number>> = {
+  PHONE_NUMBER: 120,
+  EMAIL_ADDRESS: 115,
+  ADDRESS: 110,
+  MEDICAL_RECORD_NUMBER: 105,
+  US_SSN_FULL: 105,
+  NATIONAL_ID: 105,
+  DATE_TIME: 80,
+};
+const HIGH_RISK_ENTITY_TYPES = [
+  'US_SSN_FULL',
+  'MEDICAL_RECORD_NUMBER',
+  'US_ZIP',
+  'NATIONAL_ID',
+  'HEALTH_PLAN_BENEFICIARY',
+];
 const MANDATORY_PREVIEW_ENTITY_CATEGORIES = [
   'US_SSN_FULL',
   'MEDICAL_RECORD_NUMBER',
@@ -177,6 +208,8 @@ const GDPR_MANDATORY_PREVIEW_ENTITY_CATEGORIES = [
   'PHONE_NUMBER',
   'EMAIL_ADDRESS',
   'ADDRESS',
+  'NATIONAL_ID',
+  'ORGANIZATION',
   'DATE_TIME',
   'AGE',
 ] as const;
@@ -286,12 +319,16 @@ export default class DeIdService {
         const sanitizedFindings = DeIdService.sanitizeSpans(dto.text, deduplicatedFindings);
         const clinicHeaderFindings = DeIdService.extractClinicHeaderOrganizations(dto.text);
         const structuredAddressFindings = DeIdService.extractStructuredAddressFindings(dto.text);
+        const structuredDobFindings = DeIdService.extractStructuredDobFindings(dto.text);
         const structuredNationalIdFindings = DeIdService.extractStructuredNationalIdFindings(
           dto.text,
         );
         const enrichedFindings = DeIdService.mergeFindings(
           DeIdService.mergeFindings(sanitizedFindings, clinicHeaderFindings),
-          DeIdService.mergeFindings(structuredAddressFindings, structuredNationalIdFindings),
+          DeIdService.mergeFindings(
+            DeIdService.mergeFindings(structuredAddressFindings, structuredDobFindings),
+            structuredNationalIdFindings,
+          ),
         );
 
         this.logger.log(
@@ -305,7 +342,10 @@ export default class DeIdService {
         );
         const guaranteedFindings = DeIdService.mergeFindings(
           DeIdService.mergeFindings(contextFilteredFindings, clinicHeaderFindings),
-          DeIdService.mergeFindings(structuredAddressFindings, structuredNationalIdFindings),
+          DeIdService.mergeFindings(
+            DeIdService.mergeFindings(structuredAddressFindings, structuredDobFindings),
+            structuredNationalIdFindings,
+          ),
         );
 
         this.logger.log(
@@ -719,6 +759,12 @@ export default class DeIdService {
         return `${textualMonthYearMatch[1].toUpperCase()} ${textualMonthYearMatch[2]}`;
       }
 
+      const looksLikeDate =
+        STRICT_DATE_TOKEN_PATTERN.test(value) || TEXTUAL_MONTH_PATTERN.test(value);
+      if (!looksLikeDate) {
+        return value;
+      }
+
       const monthYearMatch = value.match(/\b\d{1,2}[/.-]\d{4}\b/);
       return monthYearMatch ? monthYearMatch[0] : '[MONTH_YEAR]';
     }
@@ -1015,37 +1061,85 @@ export default class DeIdService {
       .filter((finding): finding is AnalyzerFinding => finding !== null);
   }
 
+  private static extractStructuredDobFindings(text: string): AnalyzerFinding[] {
+    return Array.from(text.matchAll(STRUCTURED_DOB_LABEL_PATTERN))
+      .map((match) => {
+        if (match.index === undefined) {
+          return null;
+        }
+
+        const valueStart = match.index + match[0].length;
+        const tail = text.slice(valueStart);
+        const valueMatch = tail.match(STRUCTURED_DOB_VALUE_PREFIX_PATTERN);
+
+        if (!valueMatch) {
+          return null;
+        }
+
+        const rawValue = valueMatch[0];
+        const leadingWhitespaceLength = rawValue.match(/^\s*/)?.[0].length ?? 0;
+        const trailingWhitespaceLength = rawValue.match(/\s*$/)?.[0].length ?? 0;
+        const normalizedStart = valueStart + leadingWhitespaceLength;
+        const normalizedEnd = valueStart + rawValue.length - trailingWhitespaceLength;
+
+        if (normalizedEnd <= normalizedStart) {
+          return null;
+        }
+
+        return {
+          entity_type: 'DATE_TIME',
+          start: normalizedStart,
+          end: normalizedEnd,
+          score: 0.99,
+        } satisfies AnalyzerFinding;
+      })
+      .filter((finding): finding is AnalyzerFinding => finding !== null);
+  }
+
   private static extractStructuredNationalIdFindings(text: string): AnalyzerFinding[] {
-    const labelPattern = new RegExp(ITALIAN_CODICE_FISCALE_LABEL_PATTERN.source, 'gi');
+    const italianLabelPattern = new RegExp(ITALIAN_CODICE_FISCALE_LABEL_PATTERN.source, 'gi');
     const codiceFiscalePattern = new RegExp(ITALIAN_CODICE_FISCALE_PATTERN.source, 'gi');
+    const germanKvLabelPattern = new RegExp(GERMAN_KV_NUMBER_LABEL_PATTERN.source, 'gi');
+    const germanKvPattern = new RegExp(GERMAN_KV_NUMBER_PATTERN.source, 'gi');
 
-    const labeledFindings = Array.from(text.matchAll(labelPattern)).map((match) => {
-      const matchedValue = match[1] ?? '';
-      const fullMatch = match[0];
-      const fullMatchStart = match.index ?? 0;
-      const start = fullMatchStart + fullMatch.lastIndexOf(matchedValue);
+    const createLabeledFindings = (labelPattern: RegExp): AnalyzerFinding[] =>
+      Array.from(text.matchAll(labelPattern)).map((match) => {
+        const matchedValue = match[1] ?? '';
+        const fullMatch = match[0];
+        const fullMatchStart = match.index ?? 0;
+        const start = fullMatchStart + fullMatch.lastIndexOf(matchedValue);
 
-      return {
-        entity_type: 'NATIONAL_ID',
-        start,
-        end: start + matchedValue.length,
-        score: 0.99,
-      } satisfies AnalyzerFinding;
-    });
+        return {
+          entity_type: 'NATIONAL_ID',
+          start,
+          end: start + matchedValue.length,
+          score: 0.99,
+        } satisfies AnalyzerFinding;
+      });
 
-    const strictPatternFindings = Array.from(text.matchAll(codiceFiscalePattern)).map((match) => {
-      const matchedValue = match[0];
-      const start = match.index ?? 0;
+    const italianLabeledFindings = createLabeledFindings(italianLabelPattern);
+    const germanKvLabeledFindings = createLabeledFindings(germanKvLabelPattern);
 
-      return {
-        entity_type: 'NATIONAL_ID',
-        start,
-        end: start + matchedValue.length,
-        score: 0.99,
-      } satisfies AnalyzerFinding;
-    });
+    const createStrictPatternFindings = (pattern: RegExp): AnalyzerFinding[] =>
+      Array.from(text.matchAll(pattern)).map((match) => {
+        const matchedValue = match[0];
+        const start = match.index ?? 0;
 
-    return DeIdService.mergeFindings(labeledFindings, strictPatternFindings);
+        return {
+          entity_type: 'NATIONAL_ID',
+          start,
+          end: start + matchedValue.length,
+          score: 0.99,
+        } satisfies AnalyzerFinding;
+      });
+
+    const italianStrictFindings = createStrictPatternFindings(codiceFiscalePattern);
+    const germanKvStrictFindings = createStrictPatternFindings(germanKvPattern);
+
+    return DeIdService.mergeFindings(
+      DeIdService.mergeFindings(italianLabeledFindings, germanKvLabeledFindings),
+      DeIdService.mergeFindings(italianStrictFindings, germanKvStrictFindings),
+    );
   }
 
   private static clampEndToFieldMarker(text: string, start: number, end: number): number {
@@ -1068,7 +1162,7 @@ export default class DeIdService {
   private static clampStartAfterFieldMarker(text: string, start: number, end: number): number {
     const value = text.substring(start, end);
     const markerPrefixMatch = value.match(
-      /^\s*(?:Clinic|Date of Service|Provider|Patient Name|Name|DOB|Date of Birth|SSN|MRN|Gender|Sex|Address|Phone)\s*:\s*/i,
+      /^\s*(?:Clinic|Date of Service|Provider|Patient Name|Name|DOB|Date of Birth|SSN|MRN|Gender|Sex|Address|Phone|Contact)\s*:\s*/i,
     );
 
     if (!markerPrefixMatch) {
@@ -1099,6 +1193,8 @@ export default class DeIdService {
 
     const prioritizedSpans = sanitizedSpans.sort(
       (first, second) =>
+        DeIdService.getPreviewCategoryPriority(second.category) -
+          DeIdService.getPreviewCategoryPriority(first.category) ||
         second.confidence - first.confidence ||
         second.end - second.start - (first.end - first.start) ||
         first.start - second.start ||
@@ -1114,6 +1210,10 @@ export default class DeIdService {
 
       return acc;
     }, []);
+  }
+
+  private static getPreviewCategoryPriority(category: string): number {
+    return PREVIEW_CATEGORY_PRIORITY[category] ?? 100;
   }
 
   private static shouldKeepNonPhiGenderValue(
@@ -1148,19 +1248,37 @@ export default class DeIdService {
   }
 
   private static extractClinicHeaderOrganizations(text: string): AnalyzerFinding[] {
-    return Array.from(text.matchAll(CLINIC_HEADER_ORGANIZATION_PATTERN)).map((match) => {
+    const clinicHeaderFindings = Array.from(text.matchAll(CLINIC_HEADER_ORGANIZATION_PATTERN)).map(
+      (match) => {
+        const matchedValue = match[1];
+        const fullMatch = match[0];
+        const fullMatchStart = match.index ?? 0;
+        const organizationStart = fullMatchStart + fullMatch.indexOf(matchedValue);
+
+        return {
+          entity_type: ORGANIZATION_ENTITY_TYPE,
+          start: organizationStart,
+          end: organizationStart + matchedValue.length,
+          score: 0.99,
+        };
+      },
+    );
+
+    const highRiskFacilityFindings = Array.from(
+      text.matchAll(HIGH_RISK_FACILITY_ORGANIZATION_PATTERN),
+    ).map((match) => {
       const matchedValue = match[1];
-      const fullMatch = match[0];
-      const fullMatchStart = match.index ?? 0;
-      const organizationStart = fullMatchStart + fullMatch.indexOf(matchedValue);
+      const start = match.index ?? 0;
 
       return {
         entity_type: ORGANIZATION_ENTITY_TYPE,
-        start: organizationStart,
-        end: organizationStart + matchedValue.length,
+        start,
+        end: start + matchedValue.length,
         score: 0.99,
       };
     });
+
+    return DeIdService.mergeFindings(clinicHeaderFindings, highRiskFacilityFindings);
   }
 
   private static hasOverlap(
@@ -1220,6 +1338,26 @@ export default class DeIdService {
       const contextEnd = Math.min(text.length, finding.end + 80);
       const context = text.substring(contextStart, contextEnd).toLowerCase();
       const isNumericToken = /^\d+$/.test(foundText);
+
+      if (finding.entity_type === 'DATE_TIME') {
+        const digitsOnlyLength = foundText.replace(/\D/g, '').length;
+        const looksLikeDateToken =
+          ABSOLUTE_DATE_PATTERN.test(rawFoundText) ||
+          STRICT_DATE_TOKEN_PATTERN.test(rawFoundText) ||
+          TEXTUAL_MONTH_PATTERN.test(rawFoundText);
+        const looksLikePhoneToken = PHONE_LIKE_VALUE_PATTERN.test(rawFoundText);
+        const hasPhoneContext = PHONE_CONTEXT_KEYWORDS.some((keyword) => context.includes(keyword));
+
+        if (!looksLikeDateToken && digitsOnlyLength >= 8) {
+          this.logger.debug(`Filtered: DATE_TIME "${foundText}" is a long non-date numeric token`);
+          return false;
+        }
+
+        if (looksLikePhoneToken && hasPhoneContext) {
+          this.logger.debug(`Filtered: DATE_TIME "${foundText}" overlaps phone-like value`);
+          return false;
+        }
+      }
 
       if (finding.entity_type === 'DATE_TIME' && ABSOLUTE_DATE_PATTERN.test(rawFoundText)) {
         return true;

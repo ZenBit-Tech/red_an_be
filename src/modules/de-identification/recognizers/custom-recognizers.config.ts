@@ -47,6 +47,10 @@ export const GDPR_EU_ANALYZER_ALLOW_LIST: string[] = [
   'MoCA',
   'CAGE',
   'AUDIT',
+  'Gastroscopy',
+  'Colonoscopy',
+  'MRI',
+  'CT',
 ];
 
 // ---------------------------------------------------------------------------
@@ -106,6 +110,7 @@ export const MEDICAL_ALLOWLIST: Record<string, string[]> = {
     'CAGE',
     'AUDIT',
   ],
+  procedures: ['gastroscopy', 'colonoscopy', 'mri', 'ct'],
 };
 
 /**
@@ -236,6 +241,23 @@ const clinicOrganizationRecognizer: CustomRecognizer = {
         '\\bPoliclinico\\s+[A-Z][A-Za-z]*(?:\\s+(?:[A-Z][A-Za-z]*|[IVX]{1,4}))*(?:\\s*(?:–|-|,)\\s*(?:[A-Z][A-Za-z]+(?:\\s+[A-Za-z]+)*)?\\s*University(?:\\s+of\\s+[A-Z][A-Za-z]+(?:\\s+[A-Za-z]+)*)?)\\b',
       score: 0.9,
     },
+    {
+      name: 'charite_hospital_name_pattern',
+      regex: '\\bCharit(?:e|\\u00e9)\\b',
+      score: 0.99,
+    },
+    {
+      name: 'charite_university_hospital_chain_pattern',
+      regex:
+        '\\bCharit(?:e|\\u00e9)\\s*(?:–|-|,)\\s*Universit(?:aets|ats|\\u00e4ts)?medizin\\s+[A-Z][A-Za-z]+(?:\\s+[A-Z][A-Za-z]+){0,2}\\b',
+      score: 0.995,
+    },
+    {
+      name: 'german_university_hospital_chain_pattern',
+      regex:
+        '\\b(?:Universit(?:aets|ats|\\u00e4ts)?medizin|Klinikum|Krankenhaus)\\s+[A-Z][A-Za-z]+(?:\\s+[A-Z][A-Za-z]+){0,4}\\b',
+      score: 0.93,
+    },
   ],
 };
 
@@ -351,6 +373,28 @@ const nationalIdRecognizer: CustomRecognizer = {
     },
   ],
   context: ['national', 'identity', 'id card', 'identification', 'citizen', 'passport'],
+};
+
+const germanHealthInsuranceNumberRecognizer: CustomRecognizer = {
+  name: 'German Health Insurance Number Recognizer',
+  supported_language: 'en',
+  supported_entity: 'NATIONAL_ID',
+  patterns: [
+    {
+      name: 'German KV number',
+      regex: '\\b[A-Z]\\d{9}\\b',
+      score: 0.95,
+    },
+  ],
+  context: [
+    'kv',
+    'kv-nr',
+    'krankenkasse',
+    'krankenversicherung',
+    'insurance',
+    'versichertennummer',
+    'health insurance',
+  ],
 };
 
 const bankAccountRecognizer: CustomRecognizer = {
@@ -723,6 +767,7 @@ export const GDPR_EU_CUSTOM_RECOGNIZERS: CustomRecognizer[] = [
   clinicalDateRecognizer,
   euVatNumberRecognizer,
   nationalIdRecognizer,
+  germanHealthInsuranceNumberRecognizer,
   italianCodiceFiscaleRecognizer,
   bankAccountRecognizer,
   biologicalDataRecognizer,
