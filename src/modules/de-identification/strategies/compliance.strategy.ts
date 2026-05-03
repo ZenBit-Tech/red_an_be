@@ -112,6 +112,7 @@ const HIPAA_STRATEGY: ComplianceStrategy = {
     IP_ADDRESS: createEntityStrategy([{ type: 'redact' }]),
     URL: createEntityStrategy([{ type: 'redact' }]),
     BIOMETRIC_ID: createEntityStrategy([{ type: 'redact' }]),
+    OCCUPATION: createEntityStrategy([{ type: 'redact' }], { riskLevel: 'medium' }),
     IMAGE: createEntityStrategy([{ type: 'redact' }]),
     FREE_TEXT: createEntityStrategy([{ type: 'keep_domain' }], { riskLevel: 'low' }),
   },

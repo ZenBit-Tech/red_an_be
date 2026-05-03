@@ -214,6 +214,58 @@ describe('DeIdService', () => {
     );
   });
 
+  it('should include occupation recognizer and OCCUPATION entity for HIPAA analysis', async () => {
+    const tm: TransactionManagerMock = {
+      create: jest.fn((target: unknown, payload: Record<string, unknown>) => {
+        if (target === DeIdJob) {
+          return {
+            id: 'job-hipaa-occupation-recognizer',
+            framework: payload.framework,
+            threshold: payload.threshold,
+            preserveStructure: payload.preserveStructure,
+            sourceTextHash: payload.sourceTextHash,
+            sourceTextLength: payload.sourceTextLength,
+          };
+        }
+
+        return {
+          id: 'entity-id',
+          ...payload,
+        };
+      }),
+      save: jest.fn(async (value: unknown) => value),
+    };
+
+    entityManagerMock.transaction.mockImplementation(
+      async (callback: (tx: TransactionManagerMock) => unknown) => callback(tm),
+    );
+
+    presidioClientMock.analyze.mockResolvedValue([] satisfies AnalyzerFinding[]);
+
+    await service.analyzeText({
+      text: 'Social History: works as accountant',
+      framework: ComplianceFramework.HIPAA,
+      threshold: 0.85,
+      preserveStructure: false,
+    });
+
+    const entityTypes = presidioClientMock.analyze.mock.calls[0][2] as string[];
+    const adHocRecognizers = presidioClientMock.analyze.mock.calls[0][3] as Array<{
+      name: string;
+      supported_entity?: string;
+    }>;
+
+    expect(entityTypes).toContain('OCCUPATION');
+    expect(adHocRecognizers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'Occupation Recognizer HIPAA',
+          supported_entity: 'OCCUPATION',
+        }),
+      ]),
+    );
+  });
+
   it('should include clinic organization recognizer for GDPR_EU analysis', async () => {
     const tm: TransactionManagerMock = {
       create: jest.fn((target: unknown, payload: Record<string, unknown>) => {
@@ -317,6 +369,7 @@ describe('DeIdService', () => {
         ]),
       }),
     );
+    expect(entityTypes).not.toContain('OCCUPATION');
   });
 
   it('should pass GDPR_EU analyzer allow-list with clinical scales to Presidio', async () => {
@@ -813,6 +866,170 @@ describe('DeIdService', () => {
     expect(text.substring(clinicFinding?.start ?? 0, clinicFinding?.end ?? 0)).toBe(
       'Vasquez Primary Care Associates',
     );
+  });
+
+  it('should add fallback OCCUPATION finding for social history when analyzer misses it', async () => {
+    const tm: TransactionManagerMock = {
+      create: jest.fn((target: unknown, payload: Record<string, unknown>) => {
+        if (target === DeIdJob) {
+          return {
+            id: 'job-occupation-fallback',
+            framework: payload.framework,
+            threshold: payload.threshold,
+            preserveStructure: payload.preserveStructure,
+            sourceTextHash: payload.sourceTextHash,
+            sourceTextLength: payload.sourceTextLength,
+          };
+        }
+
+        return { id: 'entity-id', ...payload };
+      }),
+      save: jest.fn(async (value: unknown) => value),
+    };
+
+    entityManagerMock.transaction.mockImplementation(
+      async (callback: (tx: TransactionManagerMock) => unknown) => callback(tm),
+    );
+
+    presidioClientMock.analyze.mockResolvedValue([] satisfies AnalyzerFinding[]);
+
+    const text = 'Social History: works as accountant';
+
+    const result = await service.analyzeText({
+      text,
+      framework: ComplianceFramework.HIPAA,
+      threshold: 0.85,
+      preserveStructure: false,
+    });
+
+    const occupationFinding = result.findings.find((f) => f.category === 'OCCUPATION');
+
+    expect(occupationFinding).toBeDefined();
+    expect(text.substring(occupationFinding?.start ?? 0, occupationFinding?.end ?? 0)).toBe(
+      'accountant',
+    );
+  });
+
+  it('should add fallback OCCUPATION finding for social history direct value when analyzer misses it', async () => {
+    const tm: TransactionManagerMock = {
+      create: jest.fn((target: unknown, payload: Record<string, unknown>) => {
+        if (target === DeIdJob) {
+          return {
+            id: 'job-occupation-social-history-direct',
+            framework: payload.framework,
+            threshold: payload.threshold,
+            preserveStructure: payload.preserveStructure,
+            sourceTextHash: payload.sourceTextHash,
+            sourceTextLength: payload.sourceTextLength,
+          };
+        }
+
+        return { id: 'entity-id', ...payload };
+      }),
+      save: jest.fn(async (value: unknown) => value),
+    };
+
+    entityManagerMock.transaction.mockImplementation(
+      async (callback: (tx: TransactionManagerMock) => unknown) => callback(tm),
+    );
+
+    presidioClientMock.analyze.mockResolvedValue([] satisfies AnalyzerFinding[]);
+
+    const text = 'Social History: Elementary school teacher, married with one child';
+
+    const result = await service.analyzeText({
+      text,
+      framework: ComplianceFramework.HIPAA,
+      threshold: 0.85,
+      preserveStructure: false,
+    });
+
+    const occupationFinding = result.findings.find((f) => f.category === 'OCCUPATION');
+
+    expect(occupationFinding).toBeDefined();
+    expect(text.substring(occupationFinding?.start ?? 0, occupationFinding?.end ?? 0)).toBe(
+      'Elementary school teacher',
+    );
+  });
+
+  it('should add fallback OCCUPATION finding for software engineer inside social history list', async () => {
+    const tm: TransactionManagerMock = {
+      create: jest.fn((target: unknown, payload: Record<string, unknown>) => {
+        if (target === DeIdJob) {
+          return {
+            id: 'job-occupation-social-history-list',
+            framework: payload.framework,
+            threshold: payload.threshold,
+            preserveStructure: payload.preserveStructure,
+            sourceTextHash: payload.sourceTextHash,
+            sourceTextLength: payload.sourceTextLength,
+          };
+        }
+
+        return { id: 'entity-id', ...payload };
+      }),
+      save: jest.fn(async (value: unknown) => value),
+    };
+
+    entityManagerMock.transaction.mockImplementation(
+      async (callback: (tx: TransactionManagerMock) => unknown) => callback(tm),
+    );
+
+    presidioClientMock.analyze.mockResolvedValue([] satisfies AnalyzerFinding[]);
+
+    const text =
+      'Social History: female, software engineer, moderate caffeine intake, social alcohol on weekends, practices yoga.';
+
+    const result = await service.analyzeText({
+      text,
+      framework: ComplianceFramework.HIPAA,
+      threshold: 0.85,
+      preserveStructure: false,
+    });
+
+    const occupationFinding = result.findings.find((f) => f.category === 'OCCUPATION');
+
+    expect(occupationFinding).toBeDefined();
+    expect(text.substring(occupationFinding?.start ?? 0, occupationFinding?.end ?? 0)).toBe(
+      'software engineer',
+    );
+  });
+
+  it('should NOT add occupation finding for GDPR_EU framework', async () => {
+    const tm: TransactionManagerMock = {
+      create: jest.fn((target: unknown, payload: Record<string, unknown>) => {
+        if (target === DeIdJob) {
+          return {
+            id: 'job-occupation-gdpr',
+            framework: payload.framework,
+            threshold: payload.threshold,
+            preserveStructure: payload.preserveStructure,
+            sourceTextHash: payload.sourceTextHash,
+            sourceTextLength: payload.sourceTextLength,
+          };
+        }
+
+        return { id: 'entity-id', ...payload };
+      }),
+      save: jest.fn(async (value: unknown) => value),
+    };
+
+    entityManagerMock.transaction.mockImplementation(
+      async (callback: (tx: TransactionManagerMock) => unknown) => callback(tm),
+    );
+
+    presidioClientMock.analyze.mockResolvedValue([] satisfies AnalyzerFinding[]);
+
+    const result = await service.analyzeText({
+      text: 'Social History: works as accountant',
+      framework: ComplianceFramework.GDPR_EU,
+      threshold: 0.85,
+      preserveStructure: false,
+    });
+
+    const occupationFinding = result.findings.find((f) => f.category === 'OCCUPATION');
+
+    expect(occupationFinding).toBeUndefined();
   });
 
   it('should allow toggling ORGANIZATION in preview via activeIds', async () => {
@@ -2019,7 +2236,163 @@ describe('DeIdService', () => {
       activeIds: ['e1'],
     });
 
-    expect(preview).toBe('Patient from [STATE]');
+    expect(preview).toBe('Patient from NY');
+  });
+
+  it('should keep state code and redact city for HIPAA location preview', async () => {
+    const text = 'Clinic location: Chicago, IL';
+    const hash = createHash('sha256').update(text).digest('hex');
+
+    const locationStart = text.indexOf('Chicago, IL');
+
+    entityManagerMock.findOne.mockResolvedValue({
+      id: 'job-loc-state-code',
+      framework: ComplianceFramework.HIPAA,
+      sourceTextHash: hash,
+      sourceTextLength: text.length,
+    } satisfies Partial<DeIdJob>);
+
+    entityManagerMock.find.mockResolvedValue([
+      {
+        id: 'e-location-state-code',
+        jobId: 'job-loc-state-code',
+        category: 'LOCATION',
+        confidence: 91,
+        start: locationStart,
+        end: locationStart + 'Chicago, IL'.length,
+        proxyType: 'Generalize',
+      },
+    ] satisfies Partial<DetectedEntity>[]);
+
+    const preview = await service.getPreview({
+      jobId: 'job-loc-state-code',
+      text,
+      framework: ComplianceFramework.HIPAA,
+      activeIds: ['e-location-state-code'],
+    });
+
+    expect(preview).toBe('Clinic location: IL');
+  });
+
+  it('should redact city-only location for HIPAA preview', async () => {
+    const text = 'Clinic location: Chicago';
+    const hash = createHash('sha256').update(text).digest('hex');
+
+    const locationStart = text.indexOf('Chicago');
+
+    entityManagerMock.findOne.mockResolvedValue({
+      id: 'job-loc-city-only',
+      framework: ComplianceFramework.HIPAA,
+      sourceTextHash: hash,
+      sourceTextLength: text.length,
+    } satisfies Partial<DeIdJob>);
+
+    entityManagerMock.find.mockResolvedValue([
+      {
+        id: 'e-location-city-only',
+        jobId: 'job-loc-city-only',
+        category: 'LOCATION',
+        confidence: 90,
+        start: locationStart,
+        end: locationStart + 'Chicago'.length,
+        proxyType: 'Generalize',
+      },
+    ] satisfies Partial<DetectedEntity>[]);
+
+    const preview = await service.getPreview({
+      jobId: 'job-loc-city-only',
+      text,
+      framework: ComplianceFramework.HIPAA,
+      activeIds: ['e-location-city-only'],
+    });
+
+    expect(preview).toBe('Clinic location: [REDACT]');
+  });
+
+  it('should redact occupation value in HIPAA preview', async () => {
+    const text = 'Social History: works as accountant';
+    const hash = createHash('sha256').update(text).digest('hex');
+
+    const occupationStart = text.indexOf('accountant');
+
+    entityManagerMock.findOne.mockResolvedValue({
+      id: 'job-occupation-preview',
+      framework: ComplianceFramework.HIPAA,
+      sourceTextHash: hash,
+      sourceTextLength: text.length,
+    } satisfies Partial<DeIdJob>);
+
+    entityManagerMock.find.mockResolvedValue([
+      {
+        id: 'e-occupation',
+        jobId: 'job-occupation-preview',
+        category: 'OCCUPATION',
+        confidence: 96,
+        start: occupationStart,
+        end: occupationStart + 'accountant'.length,
+        proxyType: 'Redact',
+      },
+    ] satisfies Partial<DetectedEntity>[]);
+
+    const preview = await service.getPreview({
+      jobId: 'job-occupation-preview',
+      text,
+      framework: ComplianceFramework.HIPAA,
+      activeIds: ['e-occupation'],
+    });
+
+    expect(preview).toBe('Social History: works as [REDACT]');
+  });
+
+  it('should redact occupation in HIPAA preview only when it is explicitly selected', async () => {
+    const text = 'Social History: works as accountant';
+    const hash = createHash('sha256').update(text).digest('hex');
+
+    const occupationStart = text.indexOf('accountant');
+
+    const occupationEntity = {
+      id: 'e-occupation',
+      jobId: 'job-occupation-toggle',
+      category: 'OCCUPATION',
+      confidence: 96,
+      start: occupationStart,
+      end: occupationStart + 'accountant'.length,
+      proxyType: 'Redact',
+    } satisfies Partial<DetectedEntity>;
+
+    entityManagerMock.findOne.mockResolvedValue({
+      id: 'job-occupation-toggle',
+      framework: ComplianceFramework.HIPAA,
+      sourceTextHash: hash,
+      sourceTextLength: text.length,
+    } satisfies Partial<DeIdJob>);
+
+    // First call: OCCUPATION not in activeIds → not redacted
+    entityManagerMock.find
+      .mockResolvedValueOnce([] satisfies Partial<DetectedEntity>[]) // activeEntities
+      .mockResolvedValueOnce([] satisfies Partial<DetectedEntity>[]); // mandatoryEntities
+
+    const previewWithout = await service.getPreview({
+      jobId: 'job-occupation-toggle',
+      text,
+      framework: ComplianceFramework.HIPAA,
+      activeIds: [],
+    });
+
+    // Second call: OCCUPATION in activeIds → redacted
+    entityManagerMock.find
+      .mockResolvedValueOnce([occupationEntity] satisfies Partial<DetectedEntity>[]) // activeEntities
+      .mockResolvedValueOnce([] satisfies Partial<DetectedEntity>[]); // mandatoryEntities
+
+    const previewWith = await service.getPreview({
+      jobId: 'job-occupation-toggle',
+      text,
+      framework: ComplianceFramework.HIPAA,
+      activeIds: ['e-occupation'],
+    });
+
+    expect(previewWithout).toBe(text);
+    expect(previewWith).toBe('Social History: works as [REDACT]');
   });
 
   it('should resolve overlapping findings by keeping the higher-score result', async () => {

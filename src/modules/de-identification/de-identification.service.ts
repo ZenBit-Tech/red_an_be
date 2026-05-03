@@ -175,6 +175,13 @@ const GERMAN_KV_NUMBER_LABEL_PATTERN =
 const STRUCTURED_DOB_LABEL_PATTERN = /\b(?:DOB|Date\s+of\s+Birth)\s*:\s*/gi;
 const STRUCTURED_ISSUE_DATE_LABEL_PATTERN =
   /\b(?:Date\s+of\s+Issue|Issue\s+Date|Issued(?:\s+on)?)\s*:\s*/gi;
+const OCCUPATION_WORKS_AS_LABEL_PATTERN = /\b(?:works|worked|employed|serves)\s+as\s+(?:an?\s+)?/gi;
+const OCCUPATION_FIELD_LABEL_PATTERN = /\b(?:Occupation|Profession|Employment|Job)\s*:\s*/gi;
+const OCCUPATION_SOCIAL_HISTORY_LABEL_PATTERN = /\bSocial\s+History\s*:\s*/gi;
+const OCCUPATION_SOCIAL_HISTORY_VALUE_PATTERN =
+  /\b([A-Za-z][A-Za-z-]*(?:\s+[A-Za-z-]+){0,5}\s(?:engineer|teacher|developer|programmer|nurse|physician|doctor|accountant|manager|analyst|technician|consultant|attorney|lawyer|pharmacist|therapist|scientist|designer|administrator))\b/gi;
+const OCCUPATION_VALUE_PREFIX_PATTERN =
+  /^([A-Za-z][A-Za-z-]*(?:\s+[A-Za-z-]+){0,5}?)(?=\s*(?:,|;|\.|$|\b(?:married|single|divorced|widowed|with|has|have|lives|living|smokes?|drinks?|denies)\b))/i;
 const STRUCTURED_DOB_VALUE_PREFIX_PATTERN =
   /^\s*(?:\d{1,2}[./-]\d{1,2}[./-]\d{2,4}|(?:\d{1,2}\s+)?(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{4}|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2},?\s+\d{4})\b/i;
 const TEXTUAL_MONTH_PATTERN =
@@ -224,6 +231,112 @@ const DEFAULT_PHI_VALIDATION_ALLOW_ZIP3 = true;
 const GDPR_PHI_SKIP_PATTERN_TYPES: ReadonlyArray<string> = ['SSN', 'ZIP', 'PHONE', 'IP'] as const;
 const DEFAULT_ANALYSIS_FAILURE_CODE = 'ANALYSIS_FAILED';
 const MAX_ERROR_CODE_LENGTH = 120;
+const US_STATE_CODES = new Set<string>([
+  'AL',
+  'AK',
+  'AZ',
+  'AR',
+  'CA',
+  'CO',
+  'CT',
+  'DE',
+  'FL',
+  'GA',
+  'HI',
+  'ID',
+  'IL',
+  'IN',
+  'IA',
+  'KS',
+  'KY',
+  'LA',
+  'ME',
+  'MD',
+  'MA',
+  'MI',
+  'MN',
+  'MS',
+  'MO',
+  'MT',
+  'NE',
+  'NV',
+  'NH',
+  'NJ',
+  'NM',
+  'NY',
+  'NC',
+  'ND',
+  'OH',
+  'OK',
+  'OR',
+  'PA',
+  'RI',
+  'SC',
+  'SD',
+  'TN',
+  'TX',
+  'UT',
+  'VT',
+  'VA',
+  'WA',
+  'WV',
+  'WI',
+  'WY',
+  'DC',
+]);
+const US_STATE_NAME_TO_CODE: Readonly<Record<string, string>> = {
+  alabama: 'AL',
+  alaska: 'AK',
+  arizona: 'AZ',
+  arkansas: 'AR',
+  california: 'CA',
+  colorado: 'CO',
+  connecticut: 'CT',
+  delaware: 'DE',
+  florida: 'FL',
+  georgia: 'GA',
+  hawaii: 'HI',
+  idaho: 'ID',
+  illinois: 'IL',
+  indiana: 'IN',
+  iowa: 'IA',
+  kansas: 'KS',
+  kentucky: 'KY',
+  louisiana: 'LA',
+  maine: 'ME',
+  maryland: 'MD',
+  massachusetts: 'MA',
+  michigan: 'MI',
+  minnesota: 'MN',
+  mississippi: 'MS',
+  missouri: 'MO',
+  montana: 'MT',
+  nebraska: 'NE',
+  nevada: 'NV',
+  'new hampshire': 'NH',
+  'new jersey': 'NJ',
+  'new mexico': 'NM',
+  'new york': 'NY',
+  'north carolina': 'NC',
+  'north dakota': 'ND',
+  ohio: 'OH',
+  oklahoma: 'OK',
+  oregon: 'OR',
+  pennsylvania: 'PA',
+  'rhode island': 'RI',
+  'south carolina': 'SC',
+  'south dakota': 'SD',
+  tennessee: 'TN',
+  texas: 'TX',
+  utah: 'UT',
+  vermont: 'VT',
+  virginia: 'VA',
+  washington: 'WA',
+  'west virginia': 'WV',
+  wisconsin: 'WI',
+  wyoming: 'WY',
+  'district of columbia': 'DC',
+};
 
 type TextChunk = {
   text: string;
@@ -332,16 +445,23 @@ export default class DeIdService {
         const structuredNationalIdFindings = DeIdService.extractStructuredNationalIdFindings(
           dto.text,
         );
+        const occupationFindings =
+          dto.framework === ComplianceFramework.HIPAA
+            ? DeIdService.extractOccupationFindings(dto.text)
+            : [];
         const enrichedFindings = DeIdService.mergeFindings(
           DeIdService.mergeFindings(sanitizedFindings, clinicHeaderFindings),
           DeIdService.mergeFindings(
             DeIdService.mergeFindings(structuredAddressFindings, structuredDobFindings),
-            DeIdService.mergeFindings(structuredIssueDateFindings, structuredNationalIdFindings),
+            DeIdService.mergeFindings(
+              DeIdService.mergeFindings(structuredIssueDateFindings, structuredNationalIdFindings),
+              occupationFindings,
+            ),
           ),
         );
 
         this.logger.log(
-          `Analysis pipeline counts job=${job.id} framework=${dto.framework} raw=${rawFindingsCount} deduplicated=${deduplicatedFindings.length} sanitized=${sanitizedFindings.length} clinicHeader=${clinicHeaderFindings.length} structuredAddress=${structuredAddressFindings.length} enriched=${enrichedFindings.length}`,
+          `Analysis pipeline counts job=${job.id} framework=${dto.framework} raw=${rawFindingsCount} deduplicated=${deduplicatedFindings.length} sanitized=${sanitizedFindings.length} clinicHeader=${clinicHeaderFindings.length} structuredAddress=${structuredAddressFindings.length} occupation=${occupationFindings.length} enriched=${enrichedFindings.length}`,
         );
 
         // Apply context-based filtering to reduce false positives
@@ -353,7 +473,10 @@ export default class DeIdService {
           DeIdService.mergeFindings(contextFilteredFindings, clinicHeaderFindings),
           DeIdService.mergeFindings(
             DeIdService.mergeFindings(structuredAddressFindings, structuredDobFindings),
-            DeIdService.mergeFindings(structuredIssueDateFindings, structuredNationalIdFindings),
+            DeIdService.mergeFindings(
+              DeIdService.mergeFindings(structuredIssueDateFindings, structuredNationalIdFindings),
+              occupationFindings,
+            ),
           ),
         );
 
@@ -786,11 +909,73 @@ export default class DeIdService {
     }
 
     const level = DeIdService.getStringParam(operator, 'level');
+    if (level === 'state') {
+      const stateCode = DeIdService.extractUsStateCode(value);
+      return stateCode ?? '[REDACT]';
+    }
+
     if (level) {
       return `[${level.toUpperCase()}]`;
     }
 
     return '[GENERALIZED]';
+  }
+
+  private static extractUsStateCode(value: string): string | undefined {
+    const trimmedValue = value.trim();
+
+    if (!trimmedValue) {
+      return undefined;
+    }
+
+    const cityWithCodeMatch = trimmedValue.match(/,\s*([A-Za-z]{2})\b/);
+    if (cityWithCodeMatch) {
+      const stateCode = cityWithCodeMatch[1].toUpperCase();
+
+      if (US_STATE_CODES.has(stateCode)) {
+        return stateCode;
+      }
+    }
+
+    const standaloneCodeMatch = trimmedValue.match(/^([A-Za-z]{2})$/);
+    if (standaloneCodeMatch) {
+      const stateCode = standaloneCodeMatch[1].toUpperCase();
+
+      if (US_STATE_CODES.has(stateCode)) {
+        return stateCode;
+      }
+    }
+
+    const normalizedValue = trimmedValue
+      .toLowerCase()
+      .replace(/[^a-z\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (!normalizedValue) {
+      return undefined;
+    }
+
+    const exactStateCode = US_STATE_NAME_TO_CODE[normalizedValue];
+    if (exactStateCode) {
+      return exactStateCode;
+    }
+
+    const commaSeparatedParts = trimmedValue.split(',');
+    if (commaSeparatedParts.length > 1) {
+      const lastPart = commaSeparatedParts[commaSeparatedParts.length - 1]
+        .toLowerCase()
+        .replace(/[^a-z\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const stateCodeFromLastPart = US_STATE_NAME_TO_CODE[lastPart];
+
+      if (stateCodeFromLastPart) {
+        return stateCodeFromLastPart;
+      }
+    }
+
+    return undefined;
   }
 
   private static applyAggregation(value: string, operator: PresidioOperator): string {
@@ -1191,6 +1376,60 @@ export default class DeIdService {
       DeIdService.mergeFindings(italianLabeledFindings, germanKvLabeledFindings),
       DeIdService.mergeFindings(italianStrictFindings, germanKvStrictFindings),
     );
+  }
+
+  private static extractOccupationFindings(text: string): AnalyzerFinding[] {
+    const worksAsPattern = new RegExp(OCCUPATION_WORKS_AS_LABEL_PATTERN.source, 'gi');
+    const fieldLabelPattern = new RegExp(OCCUPATION_FIELD_LABEL_PATTERN.source, 'gi');
+    const socialHistoryPattern = new RegExp(OCCUPATION_SOCIAL_HISTORY_LABEL_PATTERN.source, 'gi');
+    const socialHistoryValuePattern = new RegExp(OCCUPATION_SOCIAL_HISTORY_VALUE_PATTERN.source, 'gi');
+    const findings: AnalyzerFinding[] = [];
+
+    const addFinding = (match: RegExpExecArray, score: number): void => {
+      const valueStart = (match.index ?? 0) + match[0].length;
+      const tail = text.slice(valueStart);
+      const valueMatch = tail.match(OCCUPATION_VALUE_PREFIX_PATTERN);
+      if (!valueMatch) return;
+      const value = valueMatch[1].trimEnd();
+      if (!value) return;
+      findings.push({
+        entity_type: 'OCCUPATION',
+        start: valueStart,
+        end: valueStart + value.length,
+        score,
+      } satisfies AnalyzerFinding);
+    };
+
+    Array.from(text.matchAll(worksAsPattern)).forEach((match) => {
+      addFinding(match, 0.9);
+    });
+    Array.from(text.matchAll(fieldLabelPattern)).forEach((match) => {
+      addFinding(match, 0.95);
+    });
+    Array.from(text.matchAll(socialHistoryPattern)).forEach((match) => {
+      const sectionStart = (match.index ?? 0) + match[0].length;
+      const tail = text.slice(sectionStart);
+      const sectionMarkerMatch = tail.match(FIELD_MARKER_BOUNDARY_PATTERN);
+      const section = tail.slice(0, sectionMarkerMatch?.index ?? tail.length);
+
+      Array.from(section.matchAll(socialHistoryValuePattern)).forEach((segmentMatch) => {
+        const value = segmentMatch[1]?.trim();
+        const segmentStart = segmentMatch.index ?? 0;
+
+        if (!value) {
+          return;
+        }
+
+        findings.push({
+          entity_type: 'OCCUPATION',
+          start: sectionStart + segmentStart,
+          end: sectionStart + segmentStart + value.length,
+          score: 0.88,
+        } satisfies AnalyzerFinding);
+      });
+    });
+
+    return findings;
   }
 
   private static clampEndToFieldMarker(text: string, start: number, end: number): number {

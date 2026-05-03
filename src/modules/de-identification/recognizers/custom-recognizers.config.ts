@@ -353,6 +353,26 @@ const biometricIdRecognizer: CustomRecognizer = {
   context: ['fingerprint', 'retina', 'iris', 'biometric', 'facial', 'recognition', 'scan'],
 };
 
+const occupationRecognizerHipaa: CustomRecognizer = {
+  name: 'Occupation Recognizer HIPAA',
+  supported_language: 'en',
+  supported_entity: 'OCCUPATION',
+  patterns: [
+    {
+      name: 'occupation_field_value',
+      regex: '\\b(?:Occupation|Profession|Employment|Job)\\s*:\\s*[A-Za-z][A-Za-z\\s-]{1,40}\\b',
+      score: 0.9,
+    },
+    {
+      name: 'works_as_phrase',
+      regex:
+        '\\b(?:works|worked|employed|serves)\\s+as\\s+(?:an?\\s+)?[A-Za-z][A-Za-z\\s-]{1,40}\\b',
+      score: 0.88,
+    },
+  ],
+  context: ['social history', 'occupation', 'profession', 'employment', 'job', 'works as'],
+};
+
 // GDPR EU custom recognizers
 
 const euVatNumberRecognizer: CustomRecognizer = {
@@ -834,6 +854,7 @@ export const HIPAA_CUSTOM_RECOGNIZERS: CustomRecognizer[] = [
   vehicleIdRecognizer,
   deviceIdRecognizer,
   biometricIdRecognizer,
+  occupationRecognizerHipaa,
 ];
 
 export const GDPR_EU_CUSTOM_RECOGNIZERS: CustomRecognizer[] = [
