@@ -1382,7 +1382,10 @@ export default class DeIdService {
     const worksAsPattern = new RegExp(OCCUPATION_WORKS_AS_LABEL_PATTERN.source, 'gi');
     const fieldLabelPattern = new RegExp(OCCUPATION_FIELD_LABEL_PATTERN.source, 'gi');
     const socialHistoryPattern = new RegExp(OCCUPATION_SOCIAL_HISTORY_LABEL_PATTERN.source, 'gi');
-    const socialHistoryValuePattern = new RegExp(OCCUPATION_SOCIAL_HISTORY_VALUE_PATTERN.source, 'gi');
+    const socialHistoryValuePattern = new RegExp(
+      OCCUPATION_SOCIAL_HISTORY_VALUE_PATTERN.source,
+      'gi',
+    );
     const findings: AnalyzerFinding[] = [];
 
     const addFinding = (match: RegExpExecArray, score: number): void => {
