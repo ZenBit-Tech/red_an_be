@@ -133,13 +133,19 @@ const GDPR_EU_STRATEGY: ComplianceStrategy = {
       { type: 'keep_domain' },
       { type: 'mask', params: { chars: 6 } },
     ]),
-    PHONE_NUMBER: createEntityStrategy([{ type: 'mask', params: { chars: 6 } }, { type: 'hash' }]),
-    PL_PHONE_NUMBER: createEntityStrategy([{ type: 'mask', params: { keepFirst: 8 } }]),
+    // WP29 EU Council guidance: phone numbers with geographic codes (e.g., +49 30 for Berlin)
+    // enable "linkage attacks" when combined with DOB + gender + region. Redacting instead of
+    // masking removes re-identification risk per strict EU anonymization standards.
+    PHONE_NUMBER: createEntityStrategy([{ type: 'redact' }], { riskLevel: 'high' }),
+    PL_PHONE_NUMBER: createEntityStrategy([{ type: 'redact' }], { riskLevel: 'high' }),
+    // LOCATION generalization for GDPR: city → region. For critically small populations
+    // (e.g., villages < 1000 people), consider full redaction at the application layer.
+    // Healthcare facilities in rural areas may still enable re-identification via linkage.
     LOCATION: createEntityStrategy([
       { type: 'generalize', params: { level: 'city' } },
       { type: 'generalize', params: { level: 'region' } },
     ]),
-    DATE_TIME: createEntityStrategy([{ type: 'generalize', params: { keep: 'month_year' } }]),
+    DATE_TIME: createEntityStrategy([{ type: 'generalize', params: { keep: 'year' } }]),
     DATE_OF_BIRTH: createEntityStrategy([{ type: 'generalize', params: { keep: 'year' } }]),
     AGE: createEntityStrategy([
       { type: 'aggregate', params: { buckets: [0, 18, 30, 50, 70, 100] } },
@@ -159,6 +165,9 @@ const GDPR_EU_STRATEGY: ComplianceStrategy = {
     MEDICAL_RECORD_NUMBER: createEntityStrategy([{ type: 'hash' }], { reversible: true }),
     BIOLOGICAL_DATA: createEntityStrategy([{ type: 'redact' }], { riskLevel: 'high' }),
     FREE_TEXT: createEntityStrategy([{ type: 'redact' }]),
+    // Note: Physician signatures must be removed outside this text-based analyzer.
+    // Graphological analysis can uniquely identify physicians (a data subject under GDPR).
+    // Use Presidio Image Redactor or manual removal for scanned/embedded signatures.
   },
   adHocRecognizers: GDPR_EU_CUSTOM_RECOGNIZERS,
 };

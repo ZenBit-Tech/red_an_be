@@ -148,6 +148,55 @@ describe('DeIdService', () => {
     });
   });
 
+  it('should merge GDPR phone tail misclassified as NATIONAL_ID during analysis', async () => {
+    const tm: TransactionManagerMock = {
+      create: jest.fn((target: unknown, payload: Record<string, unknown>) => {
+        if (target === DeIdJob) {
+          return {
+            id: 'job-gdpr-phone-national-id-merge',
+            framework: payload.framework,
+            threshold: payload.threshold,
+            preserveStructure: payload.preserveStructure,
+            sourceTextHash: payload.sourceTextHash,
+            sourceTextLength: payload.sourceTextLength,
+          };
+        }
+
+        return {
+          id: 'entity-id',
+          ...payload,
+        };
+      }),
+      save: jest.fn(async (value: unknown) => value),
+    };
+
+    entityManagerMock.transaction.mockImplementation(
+      async (callback: (tx: TransactionManagerMock) => unknown) => callback(tm),
+    );
+
+    presidioClientMock.analyze.mockResolvedValueOnce([
+      { entity_type: 'PHONE_NUMBER', start: 9, end: 15, score: 0.98 },
+      { entity_type: 'NATIONAL_ID', start: 16, end: 23, score: 0.95 },
+    ] satisfies AnalyzerFinding[]);
+
+    const result = await service.analyzeText({
+      text: 'Contact: +49 30 1234567',
+      framework: ComplianceFramework.GDPR_EU,
+      threshold: 0.85,
+      preserveStructure: true,
+    });
+
+    const phoneFinding = result.findings.find((finding) => finding.category === 'PHONE_NUMBER');
+    const nationalIdFinding = result.findings.find((finding) => finding.category === 'NATIONAL_ID');
+
+    expect(phoneFinding).toMatchObject({
+      start: 9,
+      end: 23,
+      proxyType: 'Redact',
+    });
+    expect(nationalIdFinding).toBeUndefined();
+  });
+
   it('should pass strengthened clinic organization recognizer for HIPAA analysis', async () => {
     const tm: TransactionManagerMock = {
       create: jest.fn((target: unknown, payload: Record<string, unknown>) => {
@@ -1448,6 +1497,60 @@ describe('DeIdService', () => {
     expect(dobFinding).toBeDefined();
   });
 
+  it('should add structured PHONE_NUMBER finding when analyzer only returns phone-like DATE_TIME false positive', async () => {
+    const tm: TransactionManagerMock = {
+      create: jest.fn((target: unknown, payload: Record<string, unknown>) => {
+        if (target === DeIdJob) {
+          return {
+            id: 'job-structured-phone',
+            framework: payload.framework,
+            threshold: payload.threshold,
+            preserveStructure: payload.preserveStructure,
+            sourceTextHash: payload.sourceTextHash,
+            sourceTextLength: payload.sourceTextLength,
+          };
+        }
+
+        return {
+          id: `entity-${payload.category as string}`,
+          ...payload,
+        };
+      }),
+      save: jest.fn(async (value: unknown) => value),
+    };
+
+    entityManagerMock.transaction.mockImplementation(
+      async (callback: (tx: TransactionManagerMock) => unknown) => callback(tm),
+    );
+
+    const text = 'Contact: +49 30 1234567';
+    presidioClientMock.analyze.mockResolvedValue([
+      {
+        entity_type: 'DATE_TIME',
+        start: text.indexOf('30'),
+        end: text.length,
+        score: 0.99,
+      },
+    ] satisfies AnalyzerFinding[]);
+
+    const result = await service.analyzeText({
+      text,
+      framework: ComplianceFramework.GDPR_EU,
+      threshold: 0.85,
+      preserveStructure: false,
+    });
+
+    const phoneFinding = result.findings.find(
+      (finding) =>
+        finding.category === 'PHONE_NUMBER' &&
+        text.slice(finding.start, finding.end) === '+49 30 1234567',
+    );
+    const dateFinding = result.findings.find((finding) => finding.category === 'DATE_TIME');
+
+    expect(phoneFinding).toBeDefined();
+    expect(dateFinding).toBeUndefined();
+  });
+
   it('should avoid broken output when preview spans overlap around DOB and Gender fields', async () => {
     const text =
       'Patient Name: Maria Gonzalez DOB: 11/22/1991 (Age: 34) Gender: Female Address: 567 Maple Ave, Apt 3B, Chicago, IL 60622 Phone: (773) 555-2391';
@@ -1583,7 +1686,8 @@ describe('DeIdService', () => {
       activeIds: ['e-phone-overlap', 'e-date-inside-phone'],
     });
 
-    expect(preview).toMatch(/^Contact:\s+\[HASH_\d+\]$/);
+    // WP29 guidance: phone geographic codes enable linkage attacks. GDPR strategy removes area code.
+    expect(preview).toMatch(/^Contact:\s+\+39\s+\[REDACT\]$/);
     expect(preview).not.toContain('[MONTH_YEAR]');
   });
 
@@ -1619,7 +1723,168 @@ describe('DeIdService', () => {
       activeIds: ['e-contact-span'],
     });
 
-    expect(preview).toMatch(/^Contact:\s+\[HASH_\d+\]$/);
+    // WP29 guidance: phone numbers have area code removed before redaction to prevent linkage attacks.
+    expect(preview).toBe('Contact: +49 [REDACT]');
+  });
+
+  it('should remove area code from phone number before redaction in GDPR_EU preview', async () => {
+    const text = 'Contact: +49 30 1234567';
+    const hash = createHash('sha256').update(text).digest('hex');
+
+    const phoneStart = text.indexOf('+49');
+    const phoneEnd = text.length;
+
+    entityManagerMock.findOne.mockResolvedValue({
+      id: 'job-phone-areacode-gdpr',
+      framework: ComplianceFramework.GDPR_EU,
+      sourceTextHash: hash,
+      sourceTextLength: text.length,
+    } satisfies Partial<DeIdJob>);
+
+    entityManagerMock.find
+      .mockResolvedValueOnce([
+        {
+          id: 'e-phone-areacode',
+          jobId: 'job-phone-areacode-gdpr',
+          category: 'PHONE_NUMBER',
+          confidence: 98,
+          start: phoneStart,
+          end: phoneEnd,
+          proxyType: 'Redact',
+        },
+      ] satisfies Partial<DetectedEntity>[])
+      .mockResolvedValueOnce([] satisfies Partial<DetectedEntity>[]);
+
+    const preview = await service.getPreview({
+      jobId: 'job-phone-areacode-gdpr',
+      text,
+      framework: ComplianceFramework.GDPR_EU,
+      activeIds: ['e-phone-areacode'],
+    });
+
+    // WP29 guidance: area code (+49 30) is removed before redaction to prevent linkage attacks.
+    expect(preview).toBe('Contact: +49 [REDACT]');
+  });
+
+  it('should merge split PHONE_NUMBER and NATIONAL_ID spans in GDPR_EU preview', async () => {
+    const text = 'Contact: +49 30 1234567';
+    const hash = createHash('sha256').update(text).digest('hex');
+
+    entityManagerMock.findOne.mockResolvedValue({
+      id: 'job-split-phone-preview-gdpr',
+      framework: ComplianceFramework.GDPR_EU,
+      sourceTextHash: hash,
+      sourceTextLength: text.length,
+    } satisfies Partial<DeIdJob>);
+
+    entityManagerMock.find
+      .mockResolvedValueOnce([
+        {
+          id: 'e-phone-split-gdpr',
+          jobId: 'job-split-phone-preview-gdpr',
+          category: 'PHONE_NUMBER',
+          confidence: 98,
+          start: text.indexOf('+49'),
+          end: text.indexOf('1234567') - 1,
+          proxyType: 'Redact',
+        },
+      ] satisfies Partial<DetectedEntity>[])
+      .mockResolvedValueOnce([
+        {
+          id: 'e-national-id-tail-gdpr',
+          jobId: 'job-split-phone-preview-gdpr',
+          category: 'NATIONAL_ID',
+          confidence: 95,
+          start: text.indexOf('1234567'),
+          end: text.indexOf('1234567') + '1234567'.length,
+          proxyType: 'Redact',
+        },
+      ] satisfies Partial<DetectedEntity>[]);
+
+    const preview = await service.getPreview({
+      jobId: 'job-split-phone-preview-gdpr',
+      text,
+      framework: ComplianceFramework.GDPR_EU,
+      activeIds: ['e-phone-split-gdpr'],
+    });
+
+    expect(preview).toBe('Contact: +49 [REDACT]');
+  });
+
+  it('should sanitize PL_PHONE_NUMBER in GDPR_EU preview by keeping only country code', async () => {
+    const text = 'Contact: +48 501 123 456';
+    const hash = createHash('sha256').update(text).digest('hex');
+
+    const phoneStart = text.indexOf('+48');
+    const phoneEnd = text.length;
+
+    entityManagerMock.findOne.mockResolvedValue({
+      id: 'job-pl-phone-gdpr-preview',
+      framework: ComplianceFramework.GDPR_EU,
+      sourceTextHash: hash,
+      sourceTextLength: text.length,
+    } satisfies Partial<DeIdJob>);
+
+    entityManagerMock.find
+      .mockResolvedValueOnce([
+        {
+          id: 'e-pl-phone-gdpr',
+          jobId: 'job-pl-phone-gdpr-preview',
+          category: 'PL_PHONE_NUMBER',
+          confidence: 98,
+          start: phoneStart,
+          end: phoneEnd,
+          proxyType: 'Redact',
+        },
+      ] satisfies Partial<DetectedEntity>[])
+      .mockResolvedValueOnce([] satisfies Partial<DetectedEntity>[]);
+
+    const preview = await service.getPreview({
+      jobId: 'job-pl-phone-gdpr-preview',
+      text,
+      framework: ComplianceFramework.GDPR_EU,
+      activeIds: ['e-pl-phone-gdpr'],
+    });
+
+    expect(preview).toBe('Contact: +48 [REDACT]');
+  });
+
+  it('should not apply GDPR phone sanitization logic in HIPAA preview', async () => {
+    const text = 'Contact: +48 501 123 456';
+    const hash = createHash('sha256').update(text).digest('hex');
+
+    const phoneStart = text.indexOf('+48');
+    const phoneEnd = text.length;
+
+    entityManagerMock.findOne.mockResolvedValue({
+      id: 'job-phone-hipaa-preview',
+      framework: ComplianceFramework.HIPAA,
+      sourceTextHash: hash,
+      sourceTextLength: text.length,
+    } satisfies Partial<DeIdJob>);
+
+    entityManagerMock.find
+      .mockResolvedValueOnce([
+        {
+          id: 'e-phone-hipaa',
+          jobId: 'job-phone-hipaa-preview',
+          category: 'PHONE_NUMBER',
+          confidence: 98,
+          start: phoneStart,
+          end: phoneEnd,
+          proxyType: 'Redact',
+        },
+      ] satisfies Partial<DetectedEntity>[])
+      .mockResolvedValueOnce([] satisfies Partial<DetectedEntity>[]);
+
+    const preview = await service.getPreview({
+      jobId: 'job-phone-hipaa-preview',
+      text,
+      framework: ComplianceFramework.HIPAA,
+      activeIds: ['e-phone-hipaa'],
+    });
+
+    expect(preview).toBe('Contact: [REDACT]');
   });
 
   it('should fully redact Charite university facility chain in GDPR_EU preview', async () => {
@@ -1657,6 +1922,59 @@ describe('DeIdService', () => {
     });
 
     expect(preview).toBe('Facility: [REDACT], [REGION]');
+  });
+
+  it('should prioritize PHONE_NUMBER over overlapping NATIONAL_ID in GDPR_EU preview', async () => {
+    const text = 'Contact: +49 30 1234567';
+    const hash = createHash('sha256').update(text).digest('hex');
+
+    const phoneStart = text.indexOf('+49');
+    const phoneEnd = text.length;
+    const nationalIdStart = text.indexOf('1234567');
+    const nationalIdEnd = nationalIdStart + '1234567'.length;
+
+    entityManagerMock.findOne.mockResolvedValue({
+      id: 'job-phone-national-id-overlap',
+      framework: ComplianceFramework.GDPR_EU,
+      sourceTextHash: hash,
+      sourceTextLength: text.length,
+    } satisfies Partial<DeIdJob>);
+
+    // Simulate NATIONAL_ID found by Presidio, overlapping with PHONE_NUMBER
+    entityManagerMock.find
+      .mockResolvedValueOnce([
+        {
+          id: 'e-phone-overlap-national',
+          jobId: 'job-phone-national-id-overlap',
+          category: 'PHONE_NUMBER',
+          confidence: 98,
+          start: phoneStart,
+          end: phoneEnd,
+          proxyType: 'Redact',
+        },
+      ] satisfies Partial<DetectedEntity>[])
+      .mockResolvedValueOnce([
+        {
+          id: 'e-national-id-overlap',
+          jobId: 'job-phone-national-id-overlap',
+          category: 'NATIONAL_ID',
+          confidence: 95,
+          start: nationalIdStart,
+          end: nationalIdEnd,
+          proxyType: 'Redact',
+        },
+      ] satisfies Partial<DetectedEntity>[]);
+
+    const preview = await service.getPreview({
+      jobId: 'job-phone-national-id-overlap',
+      text,
+      framework: ComplianceFramework.GDPR_EU,
+      activeIds: ['e-phone-overlap-national'],
+    });
+
+    // PHONE_NUMBER (priority 120) should win over NATIONAL_ID (priority 105)
+    // NATIONAL_ID is mandatory for GDPR but overlapping PHONE_NUMBER takes precedence
+    expect(preview).toBe('Contact: +49 [REDACT]');
   });
 
   it('should keep Female and still redact address when PERSON span contains "Female Address" without colon', async () => {
@@ -1721,7 +2039,6 @@ describe('DeIdService', () => {
     expect(preview).not.toContain('Gender: [REDACT]');
     expect(preview).not.toContain('[REDACT]: [REDACT]');
   });
-
   it('should merge remote NLP findings when external recognizers are enabled', async () => {
     const tm: TransactionManagerMock = {
       create: jest.fn((target: unknown, payload: Record<string, unknown>) => {

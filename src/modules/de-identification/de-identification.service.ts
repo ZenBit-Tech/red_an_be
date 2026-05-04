@@ -172,6 +172,8 @@ const ITALIAN_CODICE_FISCALE_LABEL_PATTERN =
 const GERMAN_KV_NUMBER_PATTERN = /\b[A-Z]\d{9}\b/gi;
 const GERMAN_KV_NUMBER_LABEL_PATTERN =
   /\b(?:KV(?:-?Nr\.?|\s*No\.?)|Krankenversichertennummer|Versichertennummer|Insurance\s*No\.?)\s*:\s*([A-Z]\d{9})\b/gi;
+const STRUCTURED_PHONE_LABEL_PATTERN =
+  /\b(?:Phone|Contact|Tel(?:ephone)?|Mobile|Cell|Fax)\s*:\s*/gi;
 const STRUCTURED_DOB_LABEL_PATTERN = /\b(?:DOB|Date\s+of\s+Birth)\s*:\s*/gi;
 const STRUCTURED_ISSUE_DATE_LABEL_PATTERN =
   /\b(?:Date\s+of\s+Issue|Issue\s+Date|Issued(?:\s+on)?)\s*:\s*/gi;
@@ -216,8 +218,6 @@ const MANDATORY_PREVIEW_ENTITY_CATEGORIES = [
 ] as const;
 
 const GDPR_MANDATORY_PREVIEW_ENTITY_CATEGORIES = [
-  'PHONE_NUMBER',
-  'PL_PHONE_NUMBER',
   'EMAIL_ADDRESS',
   'ADDRESS',
   'NATIONAL_ID',
@@ -226,6 +226,7 @@ const GDPR_MANDATORY_PREVIEW_ENTITY_CATEGORIES = [
   'DATE_OF_BIRTH',
   'AGE',
 ] as const;
+const GDPR_PHONE_ENTITY_CATEGORIES = ['PHONE_NUMBER', 'PL_PHONE_NUMBER'] as const;
 const DEFAULT_PHI_VALIDATION_STRICT = true;
 const DEFAULT_PHI_VALIDATION_ALLOW_ZIP3 = true;
 const GDPR_PHI_SKIP_PATTERN_TYPES: ReadonlyArray<string> = ['SSN', 'ZIP', 'PHONE', 'IP'] as const;
@@ -438,6 +439,10 @@ export default class DeIdService {
         const sanitizedFindings = DeIdService.sanitizeSpans(dto.text, deduplicatedFindings);
         const clinicHeaderFindings = DeIdService.extractClinicHeaderOrganizations(dto.text);
         const structuredAddressFindings = DeIdService.extractStructuredAddressFindings(dto.text);
+        const structuredPhoneFindings = DeIdService.extractStructuredPhoneFindings(
+          dto.text,
+          dto.framework,
+        );
         const structuredDobFindings = DeIdService.extractStructuredDobFindings(dto.text);
         const structuredIssueDateFindings = DeIdService.extractStructuredIssueDateFindings(
           dto.text,
@@ -452,16 +457,16 @@ export default class DeIdService {
         const enrichedFindings = DeIdService.mergeFindings(
           DeIdService.mergeFindings(sanitizedFindings, clinicHeaderFindings),
           DeIdService.mergeFindings(
-            DeIdService.mergeFindings(structuredAddressFindings, structuredDobFindings),
+            DeIdService.mergeFindings(structuredAddressFindings, structuredPhoneFindings),
             DeIdService.mergeFindings(
-              DeIdService.mergeFindings(structuredIssueDateFindings, structuredNationalIdFindings),
-              occupationFindings,
+              DeIdService.mergeFindings(structuredDobFindings, structuredIssueDateFindings),
+              DeIdService.mergeFindings(structuredNationalIdFindings, occupationFindings),
             ),
           ),
         );
 
         this.logger.log(
-          `Analysis pipeline counts job=${job.id} framework=${dto.framework} raw=${rawFindingsCount} deduplicated=${deduplicatedFindings.length} sanitized=${sanitizedFindings.length} clinicHeader=${clinicHeaderFindings.length} structuredAddress=${structuredAddressFindings.length} occupation=${occupationFindings.length} enriched=${enrichedFindings.length}`,
+          `Analysis pipeline counts job=${job.id} framework=${dto.framework} raw=${rawFindingsCount} deduplicated=${deduplicatedFindings.length} sanitized=${sanitizedFindings.length} clinicHeader=${clinicHeaderFindings.length} structuredAddress=${structuredAddressFindings.length} structuredPhone=${structuredPhoneFindings.length} occupation=${occupationFindings.length} enriched=${enrichedFindings.length}`,
         );
 
         // Apply context-based filtering to reduce false positives
@@ -472,10 +477,10 @@ export default class DeIdService {
         const guaranteedFindings = DeIdService.mergeFindings(
           DeIdService.mergeFindings(contextFilteredFindings, clinicHeaderFindings),
           DeIdService.mergeFindings(
-            DeIdService.mergeFindings(structuredAddressFindings, structuredDobFindings),
+            DeIdService.mergeFindings(structuredAddressFindings, structuredPhoneFindings),
             DeIdService.mergeFindings(
-              DeIdService.mergeFindings(structuredIssueDateFindings, structuredNationalIdFindings),
-              occupationFindings,
+              DeIdService.mergeFindings(structuredDobFindings, structuredIssueDateFindings),
+              DeIdService.mergeFindings(structuredNationalIdFindings, occupationFindings),
             ),
           ),
         );
@@ -487,7 +492,21 @@ export default class DeIdService {
           )}`,
         );
 
-        const entities = guaranteedFindings.map((finding) =>
+        // Normalize split GDPR phone spans before filtering trailing NATIONAL_ID false positives.
+        const normalizedFindings = DeIdService.normalizeGdprPhoneLikeSpans(
+          dto.framework,
+          dto.text,
+          guaranteedFindings,
+          (finding) => finding.entity_type,
+          (finding, end) => ({ ...finding, end }),
+        );
+
+        // Filter out NATIONAL_ID findings that are completely contained within PHONE_NUMBER findings
+        // Presidio false positives: digit sequences in phone numbers detected as both types
+        const finalFindings =
+          DeIdService.filterNationalIdOverlappingWithPhoneNumber(normalizedFindings);
+
+        const entities = finalFindings.map((finding) =>
           tm.create(DetectedEntity, {
             jobId: job.id,
             category: finding.entity_type,
@@ -596,10 +615,17 @@ export default class DeIdService {
         return acc;
       }, {});
 
+      const normalizedEntities = DeIdService.normalizeGdprPhoneLikeSpans(
+        dto.framework,
+        dto.text,
+        Object.values(mergedEntitiesById),
+        (entity) => entity.category,
+        (entity, end) => ({ ...entity, end }),
+      );
       const strategy = getComplianceStrategy(dto.framework);
       const previewSpans = DeIdService.buildNonOverlappingPreviewSpans(
         dto.text,
-        Object.values(mergedEntitiesById),
+        normalizedEntities,
       ).sort((first, second) => second.start - first.start);
 
       const anonymizedText = previewSpans.reduce((resultText, span) => {
@@ -616,11 +642,25 @@ export default class DeIdService {
           return resultText;
         }
 
+        // GDPR WP29 guidance: remove geographic area codes from phone numbers (e.g., +49 30 → +49)
+        // to eliminate linkage attack vectors via area-code + DOB + gender combinations.
+        const isGdprPhoneNumber =
+          GDPR_PHONE_ENTITY_CATEGORIES.includes(
+            span.category as (typeof GDPR_PHONE_ENTITY_CATEGORIES)[number],
+          ) &&
+          (dto.framework === ComplianceFramework.GDPR_EU ||
+            dto.framework === ComplianceFramework.GDPR_UK);
+
         const entityStrategy = strategy.entities[span.category] ?? DEFAULT_ENTITY_STRATEGY;
-        const replacement = DeIdService.calculateReplacement(
-          originalValue,
-          entityStrategy.operators,
-        );
+        let replacement: string;
+
+        if (isGdprPhoneNumber) {
+          // For GDPR phone entities: preserve country code, redact the rest
+          const sanitized = DeIdService.sanitizePhoneForGdpr(originalValue);
+          replacement = sanitized; // Returns "+CC [REDACT]" format
+        } else {
+          replacement = DeIdService.calculateReplacement(originalValue, entityStrategy.operators);
+        }
         const trailingWhitespace = originalValue.match(/\s+$/)?.[0] ?? '';
         const replacementWithSpacing =
           trailingWhitespace && !/\s$/.test(replacement)
@@ -1202,6 +1242,90 @@ export default class DeIdService {
     }, []);
   }
 
+  private static normalizeGdprPhoneLikeSpans<T extends { start: number; end: number }>(
+    framework: ComplianceFramework,
+    text: string,
+    items: T[],
+    getCategory: (item: T) => string,
+    updateEnd: (item: T, end: number) => T,
+  ): T[] {
+    const isGdprFramework =
+      framework === ComplianceFramework.GDPR_EU || framework === ComplianceFramework.GDPR_UK;
+
+    if (!isGdprFramework || items.length < 2) {
+      return items;
+    }
+
+    const sortedItems = [...items].sort(
+      (first, second) => first.start - second.start || first.end - second.end,
+    );
+    const consumedIndexes = new Set<number>();
+
+    return sortedItems.reduce<T[]>((acc, item, index) => {
+      if (consumedIndexes.has(index)) {
+        return acc;
+      }
+
+      const itemCategory = getCategory(item);
+      const isGdprPhoneEntity = GDPR_PHONE_ENTITY_CATEGORIES.includes(
+        itemCategory as (typeof GDPR_PHONE_ENTITY_CATEGORIES)[number],
+      );
+
+      if (!isGdprPhoneEntity) {
+        acc.push(item);
+        return acc;
+      }
+
+      let normalizedItem = item;
+      let normalizedEnd = item.end;
+
+      for (let nextIndex = index + 1; nextIndex < sortedItems.length; nextIndex += 1) {
+        const isConsumed = consumedIndexes.has(nextIndex);
+        const nextItem = sortedItems[nextIndex];
+        const isNationalId = getCategory(nextItem) === 'NATIONAL_ID';
+        const shouldMerge =
+          !isConsumed &&
+          isNationalId &&
+          DeIdService.shouldMergeNationalIdIntoGdprPhone(
+            text,
+            normalizedItem.start,
+            normalizedEnd,
+            nextItem.start,
+            nextItem.end,
+          );
+
+        if (shouldMerge) {
+          normalizedEnd = nextItem.end;
+          normalizedItem = updateEnd(normalizedItem, normalizedEnd);
+          consumedIndexes.add(nextIndex);
+        }
+      }
+
+      acc.push(normalizedItem);
+      return acc;
+    }, []);
+  }
+
+  private static shouldMergeNationalIdIntoGdprPhone(
+    text: string,
+    phoneStart: number,
+    phoneEnd: number,
+    nationalIdStart: number,
+    nationalIdEnd: number,
+  ): boolean {
+    if (nationalIdStart < phoneEnd) {
+      return false;
+    }
+
+    const gap = text.slice(phoneEnd, nationalIdStart);
+    if (!/^[\s().-]*$/.test(gap)) {
+      return false;
+    }
+
+    const combinedValue = text.slice(phoneStart, nationalIdEnd).trim();
+    return combinedValue.startsWith('+') && PHONE_LIKE_VALUE_PATTERN.test(combinedValue);
+  }
+
   private static sanitizeSpans(text: string, findings: AnalyzerFinding[]): AnalyzerFinding[] {
     return findings
       .map((finding) => {
@@ -1224,6 +1348,32 @@ export default class DeIdService {
         return { ...finding, end: trimmedEnd };
       })
       .filter((finding) => finding.end > finding.start);
+  }
+
+  private static filterNationalIdOverlappingWithPhoneNumber(
+    findings: AnalyzerFinding[],
+  ): AnalyzerFinding[] {
+    // Remove NATIONAL_ID findings that completely overlap with phone findings.
+    // Presidio sometimes extracts digit sequences as both PHONE_NUMBER and NATIONAL_ID.
+    // Phone categories have higher semantic priority (+CC DD NNNNNNN format).
+    const phoneNumbers = findings.filter((f) =>
+      GDPR_PHONE_ENTITY_CATEGORIES.includes(
+        f.entity_type as (typeof GDPR_PHONE_ENTITY_CATEGORIES)[number],
+      ),
+    );
+
+    return findings.filter((finding) => {
+      if (finding.entity_type !== 'NATIONAL_ID') {
+        return true;
+      }
+
+      // Check if this NATIONAL_ID is completely contained within any phone finding
+      const isContainedInPhone = phoneNumbers.some(
+        (phone) => phone.start <= finding.start && finding.end <= phone.end,
+      );
+
+      return !isContainedInPhone;
+    });
   }
 
   private static extractStructuredAddressFindings(text: string): AnalyzerFinding[] {
@@ -1254,6 +1404,63 @@ export default class DeIdService {
 
         return {
           entity_type: 'ADDRESS',
+          start: normalizedStart,
+          end: normalizedEnd,
+          score: 0.99,
+        } satisfies AnalyzerFinding;
+      })
+      .filter((finding): finding is AnalyzerFinding => finding !== null);
+  }
+
+  private static extractStructuredPhoneFindings(
+    text: string,
+    framework: ComplianceFramework,
+  ): AnalyzerFinding[] {
+    const isGdprFramework =
+      framework === ComplianceFramework.GDPR_EU || framework === ComplianceFramework.GDPR_UK;
+
+    if (!isGdprFramework) {
+      return [];
+    }
+
+    return Array.from(text.matchAll(STRUCTURED_PHONE_LABEL_PATTERN))
+      .map((match) => {
+        if (match.index === undefined) {
+          return null;
+        }
+
+        const phoneStart = match.index + match[0].length;
+        const tail = text.slice(phoneStart);
+        const boundaryMatch = tail.match(FIELD_MARKER_BOUNDARY_PATTERN);
+        const newlineIndex = tail.indexOf('\n');
+        // Stop at the first character that cannot appear inside a phone number.
+        // This handles inline separators like "●" that are not newlines and not
+        // known field labels, but clearly terminate the phone value.
+        const nonPhoneCharMatch = tail.match(/[^+\d\s().\u002D]/u);
+        const fieldBoundaryEnd =
+          boundaryMatch && boundaryMatch.index !== undefined
+            ? phoneStart + boundaryMatch.index
+            : text.length;
+        const newlineEnd = newlineIndex !== -1 ? phoneStart + newlineIndex : text.length;
+        const nonPhoneEnd =
+          nonPhoneCharMatch && nonPhoneCharMatch.index !== undefined
+            ? phoneStart + nonPhoneCharMatch.index
+            : text.length;
+        const rawEnd = Math.min(fieldBoundaryEnd, newlineEnd, nonPhoneEnd);
+
+        const valueChunk = text.slice(phoneStart, rawEnd);
+        const leadingWhitespaceLength = valueChunk.match(/^\s*/)?.[0].length ?? 0;
+        const trailingWhitespaceLength = valueChunk.match(/[\s,;:]*$/)?.[0].length ?? 0;
+        const normalizedStart = phoneStart + leadingWhitespaceLength;
+        const normalizedEnd = rawEnd - trailingWhitespaceLength;
+        const normalizedValue = text.slice(normalizedStart, normalizedEnd);
+
+        if (normalizedEnd <= normalizedStart || !PHONE_LIKE_VALUE_PATTERN.test(normalizedValue)) {
+          return null;
+        }
+
+        return {
+          entity_type: 'PHONE_NUMBER',
           start: normalizedStart,
           end: normalizedEnd,
           score: 0.99,
@@ -1376,6 +1583,22 @@ export default class DeIdService {
       DeIdService.mergeFindings(italianLabeledFindings, germanKvLabeledFindings),
       DeIdService.mergeFindings(italianStrictFindings, germanKvStrictFindings),
     );
+  }
+
+  private static sanitizePhoneForGdpr(phoneValue: string): string {
+    // WP29 guidance: area codes (+49 30 for Berlin, +1 212 for NYC) enable linkage attacks.
+    // Remove area code to leave only country code + minimal digits.
+    // Pattern: +CC (space|dash)? AREA-CODE (space|dash)? REST → +CC [REDACT]
+    const countryCodePattern = /^(\+\d{1,3})[\s-]?\d{1,5}[\s-]?(.*)$/;
+    const match = phoneValue.match(countryCodePattern);
+
+    if (match && match[1]) {
+      // Keep country code, rest becomes [REDACT]
+      return `${match[1]} [REDACT]`;
+    }
+
+    // Fallback: return as-is if pattern doesn't match
+    return phoneValue;
   }
 
   private static extractOccupationFindings(text: string): AnalyzerFinding[] {
