@@ -715,9 +715,6 @@ const italianCodiceFiscaleRecognizer: CustomRecognizer = {
   patterns: [
     {
       name: 'Codice Fiscale',
-      // Structure: 3 surname consonants + 3 given-name consonants + 2-digit year
-      // + month letter (A-E,H,L,M,P,R,S,T) + 2-digit day + gender letter
-      // + 3-digit municipality code + check letter
       regex: '\\b[A-Z]{6,7}\\d{2}[A-EHLMPRST]\\d{2}[A-Z]\\d{3}[A-Z]\\b',
       score: 0.97,
     },
@@ -734,7 +731,6 @@ const italianAddressRecognizer: CustomRecognizer = {
   patterns: [
     {
       name: 'italian_street_with_number',
-      // Captures: "Via Roma 1", "Corso Italia 22", "Piazza Navona 3, 00100"
       regex:
         '\\b(?:Via|Corso|Piazza|Viale|Vicolo|Largo|Strada)\\s+[A-Za-z][A-Za-z\\s]+\\d+(?:,?\\s*\\d{5})?\\b',
       score: 0.9,
@@ -750,21 +746,18 @@ const clinicalDateRecognizer: CustomRecognizer = {
   patterns: [
     {
       name: 'day_month_name_year',
-      // Captures: "08 April 2026", "8 Apr 2026"
       regex:
         '\\b\\d{1,2}\\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\\s+\\d{4}\\b',
       score: 0.95,
     },
     {
       name: 'month_name_day_year',
-      // Captures: "April 08, 2026", "Apr 8 2026"
       regex:
         '\\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\\s+\\d{1,2},?\\s+\\d{4}\\b',
       score: 0.95,
     },
     {
       name: 'numeric_date_dmy',
-      // Captures: "08/04/2026", "08-04-2026", "08.04.2026"
       regex: '\\b\\d{1,2}[/.\\-]\\d{1,2}[/.\\-]\\d{4}\\b',
       score: 0.92,
     },
