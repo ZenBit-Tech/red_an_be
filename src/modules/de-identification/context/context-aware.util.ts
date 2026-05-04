@@ -99,7 +99,9 @@ function isClinicalNumber(value: string): boolean {
 
 function isDateOfService(text: string, index: number): boolean {
   const window = text.slice(Math.max(0, index - 60), index + 30).toLowerCase();
-  return /date\s+of\s+service|dos:|visit\s+date|service\s+date/.test(window);
+  return /date\s+of\s+service|dos:|visit\s+date|service\s+date|consultation\s+date|date\s+of\s+consultation|discharge\s+date|admission\s+date/.test(
+    window,
+  );
 }
 
 // ==============================
