@@ -9,7 +9,7 @@ export const MAIL_TEMPLATES = {
 } as const;
 
 export const MAIL_SUBJECTS = {
-  MAGIC_LINK: 'Sign in to De-ID Studio',
+  MAGIC_LINK: 'Sign in to Clinical Data Studio',
   CONTACT_LEAD_PREFIX: 'New Lead Inquiry',
 } as const;
 
