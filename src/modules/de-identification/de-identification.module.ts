@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import DeIdJob from '@db/entities/de-id-job.entity';
-import DetectedEntity from '@db/entities/detected-entity.entity';
+import DeIdJob from '@common/db/entities/de-id-job.entity';
+import DetectedEntity from '@common/db/entities/detected-entity.entity';
 import DeIdController from './de-identification.controller';
 import DeIdService from './de-identification.service';
 import StatsService from './stats.service';

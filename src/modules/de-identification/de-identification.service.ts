@@ -17,8 +17,8 @@ import {
   DE_ID_REMOTE_NLP_ENV,
   DeIdMethod,
 } from '@common/constants/compliance.constants';
-import DeIdJob, { DeIdJobStatus } from '@db/entities/de-id-job.entity';
-import DetectedEntity from '@db/entities/detected-entity.entity';
+import DeIdJob, { DeIdJobStatus } from '@common/db/entities/de-id-job.entity';
+import DetectedEntity from '@common/db/entities/detected-entity.entity';
 import { shouldKeepOriginalByContext } from './context/context-aware.util';
 import { normalizeAnonymizedText } from './context/normalization.util';
 import { PhiLeakDetectedError, ValidationOptions, validatePhi } from './context/phi-validator.util';
@@ -36,6 +36,7 @@ import {
   getComplianceStrategy,
 } from './strategies/compliance.strategy';
 import {
+  GDPR_EU_ANALYZER_ALLOW_LIST,
   HIPAA_ANALYZER_ALLOW_LIST,
   MEDICAL_ALLOWLIST,
   isInMedicalAllowlist,
@@ -94,6 +95,15 @@ const AGE_CONTEXT_KEYWORDS = [
   'y/o',
   'y.o.', // medical abbreviations
 ];
+const DATE_TIME_CONTEXT_KEYWORDS = [
+  'consultation',
+  'visit',
+  'appointment',
+  'discharge',
+  'admission',
+  'issue',
+  'issued',
+];
 const STRUCTURED_FIELD_LABELS = [
   'Clinic',
   'Date of Service',
@@ -108,6 +118,7 @@ const STRUCTURED_FIELD_LABELS = [
   'Sex',
   'Address',
   'Phone',
+  'Contact',
   'Chief Complaint',
   'History of Present Illness',
   'Past Medical History',
@@ -140,19 +151,63 @@ const SOFT_BOUNDARY_FIELD_LABELS = [
   'Sex',
   'Address',
   'Phone',
+  'Contact',
 ] as const;
 const FIELD_LABEL_SOFT_BOUNDARY_PATTERN = new RegExp(
   `\\s+(?:${SOFT_BOUNDARY_FIELD_LABELS.join('|')})\\b:?`,
   'i',
 );
 const GENDER_TAIL_BOUNDARY_PATTERN =
-  /^(?:Address|Phone|DOB|Date of Birth|SSN|MRN|Provider|Patient Name)\b:?/i;
+  /^(?:Address|Phone|Contact|DOB|Date of Birth|SSN|MRN|Provider|Patient Name)\b:?/i;
 const NON_PHI_GENDER_VALUE_PATTERN = /^(?:male|female|other|unknown|non-binary|nonbinary|m|f)$/i;
 const ORGANIZATION_ENTITY_TYPE = 'ORGANIZATION';
 const ABSOLUTE_DATE_PATTERN = /\b\d{1,2}[/.-]\d{1,2}[/.-]\d{4}\b/;
 const CLINIC_HEADER_ORGANIZATION_PATTERN =
   /\bClinic:\s*([A-Z][A-Za-z.&-]+(?:\s+[A-Z][A-Za-z.&-]+){0,3}\s+Primary\s+Care\s+Associates)\b/g;
-const HIGH_RISK_ENTITY_TYPES = ['US_SSN_FULL', 'MEDICAL_RECORD_NUMBER', 'US_ZIP'];
+const HIGH_RISK_FACILITY_ORGANIZATION_PATTERN =
+  /\b((?:Charit(?:e|\u00e9)\s*(?:–|-|,)\s*Universit(?:aets|ats|\u00e4ts)?medizin\s+[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,2})|(?:Charit(?:e|\u00e9)\b(?!\s*(?:–|-|,)\s*Universit(?:aets|ats|\u00e4ts)?medizin\b))|(?:Universit(?:aets|ats|\u00e4ts)?medizin\s+[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,2})|(?:Klinikum\s+[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3})|(?:Krankenhaus\s+[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3}))\b/gi;
+const ITALIAN_CODICE_FISCALE_PATTERN = /\b[A-Z]{6,7}\d{2}[A-EHLMPRST]\d{2}[A-Z]\d{3}[A-Z]\b/gi;
+const ITALIAN_CODICE_FISCALE_LABEL_PATTERN =
+  /\b(?:Codice\s+Fiscale|CF|Tax\s*Code)\s*:\s*([A-Z0-9]{11,20})\b/gi;
+const GERMAN_KV_NUMBER_PATTERN = /\b[A-Z]\d{9}\b/gi;
+const GERMAN_KV_NUMBER_LABEL_PATTERN =
+  /\b(?:KV(?:-?Nr\.?|\s*No\.?)|Krankenversichertennummer|Versichertennummer|Insurance\s*No\.?)\s*:\s*([A-Z]\d{9})\b/gi;
+const STRUCTURED_PHONE_LABEL_PATTERN =
+  /\b(?:Phone|Contact|Tel(?:ephone)?|Mobile|Cell|Fax)\s*:\s*/gi;
+const STRUCTURED_DOB_LABEL_PATTERN = /\b(?:DOB|Date\s+of\s+Birth)\s*:\s*/gi;
+const STRUCTURED_ISSUE_DATE_LABEL_PATTERN =
+  /\b(?:Date\s+of\s+Issue|Issue\s+Date|Issued(?:\s+on)?)\s*:\s*/gi;
+const OCCUPATION_WORKS_AS_LABEL_PATTERN = /\b(?:works|worked|employed|serves)\s+as\s+(?:an?\s+)?/gi;
+const OCCUPATION_FIELD_LABEL_PATTERN = /\b(?:Occupation|Profession|Employment|Job)\s*:\s*/gi;
+const OCCUPATION_SOCIAL_HISTORY_LABEL_PATTERN = /\bSocial\s+History\s*:\s*/gi;
+const OCCUPATION_SOCIAL_HISTORY_VALUE_PATTERN =
+  /\b([A-Za-z][A-Za-z-]*(?:\s+[A-Za-z-]+){0,5}\s(?:engineer|teacher|developer|programmer|nurse|physician|doctor|accountant|manager|analyst|technician|consultant|attorney|lawyer|pharmacist|therapist|scientist|designer|administrator))\b/gi;
+const OCCUPATION_VALUE_PREFIX_PATTERN =
+  /^([A-Za-z][A-Za-z-]*(?:\s+[A-Za-z-]+){0,5}?)(?=\s*(?:,|;|\.|$|\b(?:married|single|divorced|widowed|with|has|have|lives|living|smokes?|drinks?|denies)\b))/i;
+const STRUCTURED_DOB_VALUE_PREFIX_PATTERN =
+  /^\s*(?:\d{1,2}[./-]\d{1,2}[./-]\d{2,4}|(?:\d{1,2}\s+)?(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{4}|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2},?\s+\d{4})\b/i;
+const TEXTUAL_MONTH_PATTERN =
+  /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/i;
+const STRICT_DATE_TOKEN_PATTERN =
+  /^\s*(?:\d{1,2}[/. -]\d{1,2}(?:[/. -]\d{2,4})?|\d{1,2}[/. -]\d{4})\s*$/;
+const PHONE_LIKE_VALUE_PATTERN = /^\s*\+?\d(?:[\d\s().-]{5,}\d)?\s*$/;
+const PHONE_CONTEXT_KEYWORDS = ['phone', 'contact', 'tel', 'mobile', 'cell', 'fax'] as const;
+const PREVIEW_CATEGORY_PRIORITY: Readonly<Record<string, number>> = {
+  PHONE_NUMBER: 120,
+  EMAIL_ADDRESS: 115,
+  ADDRESS: 110,
+  MEDICAL_RECORD_NUMBER: 105,
+  US_SSN_FULL: 105,
+  NATIONAL_ID: 105,
+  DATE_TIME: 80,
+};
+const HIGH_RISK_ENTITY_TYPES = [
+  'US_SSN_FULL',
+  'MEDICAL_RECORD_NUMBER',
+  'US_ZIP',
+  'NATIONAL_ID',
+  'HEALTH_PLAN_BENEFICIARY',
+];
 const MANDATORY_PREVIEW_ENTITY_CATEGORIES = [
   'US_SSN_FULL',
   'MEDICAL_RECORD_NUMBER',
@@ -161,10 +216,128 @@ const MANDATORY_PREVIEW_ENTITY_CATEGORIES = [
   'ADDRESS',
   'US_ZIP',
 ] as const;
+
+const GDPR_MANDATORY_PREVIEW_ENTITY_CATEGORIES = [
+  'EMAIL_ADDRESS',
+  'ADDRESS',
+  'NATIONAL_ID',
+  'ORGANIZATION',
+  'DATE_TIME',
+  'DATE_OF_BIRTH',
+  'AGE',
+] as const;
+const GDPR_PHONE_ENTITY_CATEGORIES = ['PHONE_NUMBER', 'PL_PHONE_NUMBER'] as const;
 const DEFAULT_PHI_VALIDATION_STRICT = true;
 const DEFAULT_PHI_VALIDATION_ALLOW_ZIP3 = true;
+const GDPR_PHI_SKIP_PATTERN_TYPES: ReadonlyArray<string> = ['SSN', 'ZIP', 'PHONE', 'IP'] as const;
 const DEFAULT_ANALYSIS_FAILURE_CODE = 'ANALYSIS_FAILED';
 const MAX_ERROR_CODE_LENGTH = 120;
+const US_STATE_CODES = new Set<string>([
+  'AL',
+  'AK',
+  'AZ',
+  'AR',
+  'CA',
+  'CO',
+  'CT',
+  'DE',
+  'FL',
+  'GA',
+  'HI',
+  'ID',
+  'IL',
+  'IN',
+  'IA',
+  'KS',
+  'KY',
+  'LA',
+  'ME',
+  'MD',
+  'MA',
+  'MI',
+  'MN',
+  'MS',
+  'MO',
+  'MT',
+  'NE',
+  'NV',
+  'NH',
+  'NJ',
+  'NM',
+  'NY',
+  'NC',
+  'ND',
+  'OH',
+  'OK',
+  'OR',
+  'PA',
+  'RI',
+  'SC',
+  'SD',
+  'TN',
+  'TX',
+  'UT',
+  'VT',
+  'VA',
+  'WA',
+  'WV',
+  'WI',
+  'WY',
+  'DC',
+]);
+const US_STATE_NAME_TO_CODE: Readonly<Record<string, string>> = {
+  alabama: 'AL',
+  alaska: 'AK',
+  arizona: 'AZ',
+  arkansas: 'AR',
+  california: 'CA',
+  colorado: 'CO',
+  connecticut: 'CT',
+  delaware: 'DE',
+  florida: 'FL',
+  georgia: 'GA',
+  hawaii: 'HI',
+  idaho: 'ID',
+  illinois: 'IL',
+  indiana: 'IN',
+  iowa: 'IA',
+  kansas: 'KS',
+  kentucky: 'KY',
+  louisiana: 'LA',
+  maine: 'ME',
+  maryland: 'MD',
+  massachusetts: 'MA',
+  michigan: 'MI',
+  minnesota: 'MN',
+  mississippi: 'MS',
+  missouri: 'MO',
+  montana: 'MT',
+  nebraska: 'NE',
+  nevada: 'NV',
+  'new hampshire': 'NH',
+  'new jersey': 'NJ',
+  'new mexico': 'NM',
+  'new york': 'NY',
+  'north carolina': 'NC',
+  'north dakota': 'ND',
+  ohio: 'OH',
+  oklahoma: 'OK',
+  oregon: 'OR',
+  pennsylvania: 'PA',
+  'rhode island': 'RI',
+  'south carolina': 'SC',
+  'south dakota': 'SD',
+  tennessee: 'TN',
+  texas: 'TX',
+  utah: 'UT',
+  vermont: 'VT',
+  virginia: 'VA',
+  washington: 'WA',
+  'west virginia': 'WV',
+  wisconsin: 'WI',
+  wyoming: 'WY',
+  'district of columbia': 'DC',
+};
 
 type TextChunk = {
   text: string;
@@ -266,13 +439,34 @@ export default class DeIdService {
         const sanitizedFindings = DeIdService.sanitizeSpans(dto.text, deduplicatedFindings);
         const clinicHeaderFindings = DeIdService.extractClinicHeaderOrganizations(dto.text);
         const structuredAddressFindings = DeIdService.extractStructuredAddressFindings(dto.text);
+        const structuredPhoneFindings = DeIdService.extractStructuredPhoneFindings(
+          dto.text,
+          dto.framework,
+        );
+        const structuredDobFindings = DeIdService.extractStructuredDobFindings(dto.text);
+        const structuredIssueDateFindings = DeIdService.extractStructuredIssueDateFindings(
+          dto.text,
+        );
+        const structuredNationalIdFindings = DeIdService.extractStructuredNationalIdFindings(
+          dto.text,
+        );
+        const occupationFindings =
+          dto.framework === ComplianceFramework.HIPAA
+            ? DeIdService.extractOccupationFindings(dto.text)
+            : [];
         const enrichedFindings = DeIdService.mergeFindings(
           DeIdService.mergeFindings(sanitizedFindings, clinicHeaderFindings),
-          structuredAddressFindings,
+          DeIdService.mergeFindings(
+            DeIdService.mergeFindings(structuredAddressFindings, structuredPhoneFindings),
+            DeIdService.mergeFindings(
+              DeIdService.mergeFindings(structuredDobFindings, structuredIssueDateFindings),
+              DeIdService.mergeFindings(structuredNationalIdFindings, occupationFindings),
+            ),
+          ),
         );
 
         this.logger.log(
-          `Analysis pipeline counts job=${job.id} framework=${dto.framework} raw=${rawFindingsCount} deduplicated=${deduplicatedFindings.length} sanitized=${sanitizedFindings.length} clinicHeader=${clinicHeaderFindings.length} structuredAddress=${structuredAddressFindings.length} enriched=${enrichedFindings.length}`,
+          `Analysis pipeline counts job=${job.id} framework=${dto.framework} raw=${rawFindingsCount} deduplicated=${deduplicatedFindings.length} sanitized=${sanitizedFindings.length} clinicHeader=${clinicHeaderFindings.length} structuredAddress=${structuredAddressFindings.length} structuredPhone=${structuredPhoneFindings.length} occupation=${occupationFindings.length} enriched=${enrichedFindings.length}`,
         );
 
         // Apply context-based filtering to reduce false positives
@@ -282,7 +476,13 @@ export default class DeIdService {
         );
         const guaranteedFindings = DeIdService.mergeFindings(
           DeIdService.mergeFindings(contextFilteredFindings, clinicHeaderFindings),
-          structuredAddressFindings,
+          DeIdService.mergeFindings(
+            DeIdService.mergeFindings(structuredAddressFindings, structuredPhoneFindings),
+            DeIdService.mergeFindings(
+              DeIdService.mergeFindings(structuredDobFindings, structuredIssueDateFindings),
+              DeIdService.mergeFindings(structuredNationalIdFindings, occupationFindings),
+            ),
+          ),
         );
 
         this.logger.log(
@@ -292,7 +492,21 @@ export default class DeIdService {
           )}`,
         );
 
-        const entities = guaranteedFindings.map((finding) =>
+        // Normalize split GDPR phone spans before filtering trailing NATIONAL_ID false positives.
+        const normalizedFindings = DeIdService.normalizeGdprPhoneLikeSpans(
+          dto.framework,
+          dto.text,
+          guaranteedFindings,
+          (finding) => finding.entity_type,
+          (finding, end) => ({ ...finding, end }),
+        );
+
+        // Filter out NATIONAL_ID findings that are completely contained within PHONE_NUMBER findings
+        // Presidio false positives: digit sequences in phone numbers detected as both types
+        const finalFindings =
+          DeIdService.filterNationalIdOverlappingWithPhoneNumber(normalizedFindings);
+
+        const entities = finalFindings.map((finding) =>
           tm.create(DetectedEntity, {
             jobId: job.id,
             category: finding.entity_type,
@@ -379,10 +593,17 @@ export default class DeIdService {
         order: { start: 'ASC' },
       });
 
+      const isGdprFramework =
+        dto.framework === ComplianceFramework.GDPR_EU ||
+        dto.framework === ComplianceFramework.GDPR_UK;
+      const mandatoryCategories = isGdprFramework
+        ? GDPR_MANDATORY_PREVIEW_ENTITY_CATEGORIES
+        : MANDATORY_PREVIEW_ENTITY_CATEGORIES;
+
       const mandatoryEntities = await this.entityManager.find(DetectedEntity, {
         where: {
           jobId: dto.jobId,
-          category: In([...MANDATORY_PREVIEW_ENTITY_CATEGORIES]),
+          category: In([...mandatoryCategories]),
         },
         order: { start: 'ASC' },
       });
@@ -394,10 +615,17 @@ export default class DeIdService {
         return acc;
       }, {});
 
+      const normalizedEntities = DeIdService.normalizeGdprPhoneLikeSpans(
+        dto.framework,
+        dto.text,
+        Object.values(mergedEntitiesById),
+        (entity) => entity.category,
+        (entity, end) => ({ ...entity, end }),
+      );
       const strategy = getComplianceStrategy(dto.framework);
       const previewSpans = DeIdService.buildNonOverlappingPreviewSpans(
         dto.text,
-        Object.values(mergedEntitiesById),
+        normalizedEntities,
       ).sort((first, second) => second.start - first.start);
 
       const anonymizedText = previewSpans.reduce((resultText, span) => {
@@ -414,11 +642,25 @@ export default class DeIdService {
           return resultText;
         }
 
+        // GDPR WP29 guidance: remove geographic area codes from phone numbers (e.g., +49 30 → +49)
+        // to eliminate linkage attack vectors via area-code + DOB + gender combinations.
+        const isGdprPhoneNumber =
+          GDPR_PHONE_ENTITY_CATEGORIES.includes(
+            span.category as (typeof GDPR_PHONE_ENTITY_CATEGORIES)[number],
+          ) &&
+          (dto.framework === ComplianceFramework.GDPR_EU ||
+            dto.framework === ComplianceFramework.GDPR_UK);
+
         const entityStrategy = strategy.entities[span.category] ?? DEFAULT_ENTITY_STRATEGY;
-        const replacement = DeIdService.calculateReplacement(
-          originalValue,
-          entityStrategy.operators,
-        );
+        let replacement: string;
+
+        if (isGdprPhoneNumber) {
+          // For GDPR phone entities: preserve country code, redact the rest
+          const sanitized = DeIdService.sanitizePhoneForGdpr(originalValue);
+          replacement = sanitized; // Returns "+CC [REDACT]" format
+        } else {
+          replacement = DeIdService.calculateReplacement(originalValue, entityStrategy.operators);
+        }
         const trailingWhitespace = originalValue.match(/\s+$/)?.[0] ?? '';
         const replacementWithSpacing =
           trailingWhitespace && !/\s$/.test(replacement)
@@ -431,7 +673,7 @@ export default class DeIdService {
       }, dto.text);
 
       const normalizedText = normalizeAnonymizedText(anonymizedText);
-      const validationOptions = this.getPhiValidationOptions();
+      const validationOptions = this.getPhiValidationOptions(dto.framework);
       const validationResult = validatePhi(normalizedText, validationOptions);
 
       if (!validationResult.valid) {
@@ -448,7 +690,10 @@ export default class DeIdService {
 
       if (error instanceof PhiLeakDetectedError) {
         this.logger.warn(error.message);
-        throw new UnprocessableEntityException('PHI leak detected after anonymization');
+        const leakTypes = [...new Set(error.leaks.map((l) => l.type))].join(', ');
+        throw new UnprocessableEntityException(
+          `PHI leak detected after anonymization: ${leakTypes}`,
+        );
       }
 
       const message = error instanceof Error ? error.message : String(error);
@@ -457,7 +702,7 @@ export default class DeIdService {
     }
   }
 
-  private getPhiValidationOptions(): ValidationOptions {
+  private getPhiValidationOptions(framework?: ComplianceFramework): ValidationOptions {
     const strictConfig = this.configService.get<string>(
       DE_ID_POST_VALIDATION_ENV.PHI_VALIDATION_STRICT,
     );
@@ -465,9 +710,13 @@ export default class DeIdService {
       DE_ID_POST_VALIDATION_ENV.PHI_VALIDATION_ALLOW_ZIP3,
     );
 
+    const isGdprFramework =
+      framework === ComplianceFramework.GDPR_EU || framework === ComplianceFramework.GDPR_UK;
+
     return {
       strict: strictConfig ? strictConfig === 'true' : DEFAULT_PHI_VALIDATION_STRICT,
       allowZip3: allowZip3Config ? allowZip3Config === 'true' : DEFAULT_PHI_VALIDATION_ALLOW_ZIP3,
+      skipPatternTypes: isGdprFramework ? GDPR_PHI_SKIP_PATTERN_TYPES : undefined,
     };
   }
 
@@ -603,6 +852,13 @@ export default class DeIdService {
   }
 
   private static applyMask(value: string, operator: PresidioOperator): string {
+    const keepFirst = DeIdService.getNumberParam(operator, 'keepFirst');
+
+    if (keepFirst !== undefined) {
+      const prefix = value.slice(0, keepFirst);
+      return `${prefix}[REDACT]`;
+    }
+
     const charsToMask = DeIdService.getNumberParam(operator, 'chars') ?? value.length;
     const keepLast = DeIdService.getNumberParam(operator, 'keepLast') ?? 0;
 
@@ -632,6 +888,13 @@ export default class DeIdService {
         ? operator.params.strict
         : false;
     if (keep === 'year') {
+      const textualMonthYearMatch = value.match(
+        /\b(?:\d{1,2}\s+)?(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{4})\b/i,
+      );
+      if (textualMonthYearMatch) {
+        return `${textualMonthYearMatch[1].toUpperCase()} ${textualMonthYearMatch[2]}`;
+      }
+
       // strict=true only makes sense for strings that actually look like a date
       const looksLikeDate =
         /\b\d{1,2}[/.\s-]\d{1,2}[/.\s-]\d{2,4}\b/.test(value) ||
@@ -668,11 +931,29 @@ export default class DeIdService {
     }
 
     if (keep === 'month_year') {
+      const textualMonthYearMatch = value.match(
+        /\b(?:\d{1,2}\s+)?(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{4})\b/i,
+      );
+      if (textualMonthYearMatch) {
+        return `${textualMonthYearMatch[1].toUpperCase()} ${textualMonthYearMatch[2]}`;
+      }
+
+      const looksLikeDate =
+        STRICT_DATE_TOKEN_PATTERN.test(value) || TEXTUAL_MONTH_PATTERN.test(value);
+      if (!looksLikeDate) {
+        return value;
+      }
+
       const monthYearMatch = value.match(/\b\d{1,2}[/.-]\d{4}\b/);
       return monthYearMatch ? monthYearMatch[0] : '[MONTH_YEAR]';
     }
 
     const level = DeIdService.getStringParam(operator, 'level');
+    if (level === 'state') {
+      const stateCode = DeIdService.extractUsStateCode(value);
+      return stateCode ?? '[REDACT]';
+    }
+
     if (level) {
       return `[${level.toUpperCase()}]`;
     }
@@ -680,9 +961,68 @@ export default class DeIdService {
     return '[GENERALIZED]';
   }
 
+  private static extractUsStateCode(value: string): string | undefined {
+    const trimmedValue = value.trim();
+
+    if (!trimmedValue) {
+      return undefined;
+    }
+
+    const cityWithCodeMatch = trimmedValue.match(/,\s*([A-Za-z]{2})\b/);
+    if (cityWithCodeMatch) {
+      const stateCode = cityWithCodeMatch[1].toUpperCase();
+
+      if (US_STATE_CODES.has(stateCode)) {
+        return stateCode;
+      }
+    }
+
+    const standaloneCodeMatch = trimmedValue.match(/^([A-Za-z]{2})$/);
+    if (standaloneCodeMatch) {
+      const stateCode = standaloneCodeMatch[1].toUpperCase();
+
+      if (US_STATE_CODES.has(stateCode)) {
+        return stateCode;
+      }
+    }
+
+    const normalizedValue = trimmedValue
+      .toLowerCase()
+      .replace(/[^a-z\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (!normalizedValue) {
+      return undefined;
+    }
+
+    const exactStateCode = US_STATE_NAME_TO_CODE[normalizedValue];
+    if (exactStateCode) {
+      return exactStateCode;
+    }
+
+    const commaSeparatedParts = trimmedValue.split(',');
+    if (commaSeparatedParts.length > 1) {
+      const lastPart = commaSeparatedParts[commaSeparatedParts.length - 1]
+        .toLowerCase()
+        .replace(/[^a-z\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const stateCodeFromLastPart = US_STATE_NAME_TO_CODE[lastPart];
+
+      if (stateCodeFromLastPart) {
+        return stateCodeFromLastPart;
+      }
+    }
+
+    return undefined;
+  }
+
   private static applyAggregation(value: string, operator: PresidioOperator): string {
     const buckets = DeIdService.getNumberArrayParam(operator, 'buckets');
-    const numericValue = Number.parseInt(value, 10);
+    // Extract the first integer from labeled formats like "(Age: 66)" or "Age: 66"
+    const rawDigits = /\b(\d{1,3})\b/.exec(value);
+    const numericValue = rawDigits ? Number.parseInt(rawDigits[1], 10) : Number.parseInt(value, 10);
 
     if (!Number.isFinite(numericValue) || buckets.length < 2) {
       return '[AGGREGATED]';
@@ -818,7 +1158,7 @@ export default class DeIdService {
       threshold,
       analyzableEntities,
       strategy.adHocRecognizers,
-      framework === ComplianceFramework.HIPAA ? HIPAA_ANALYZER_ALLOW_LIST : [],
+      DeIdService.getAnalyzerAllowList(framework),
     );
     const latencyMs = Date.now() - startedAt;
     this.logger.log(
@@ -826,6 +1166,18 @@ export default class DeIdService {
     );
 
     return findings;
+  }
+
+  private static getAnalyzerAllowList(framework: ComplianceFramework): string[] {
+    if (framework === ComplianceFramework.HIPAA) {
+      return HIPAA_ANALYZER_ALLOW_LIST;
+    }
+
+    if (framework === ComplianceFramework.GDPR_EU) {
+      return GDPR_EU_ANALYZER_ALLOW_LIST;
+    }
+
+    return [];
   }
 
   private static getRemoteNlpEntities(
@@ -890,6 +1242,90 @@ export default class DeIdService {
     }, []);
   }
 
+  private static normalizeGdprPhoneLikeSpans<T extends { start: number; end: number }>(
+    framework: ComplianceFramework,
+    text: string,
+    items: T[],
+    getCategory: (item: T) => string,
+    updateEnd: (item: T, end: number) => T,
+  ): T[] {
+    const isGdprFramework =
+      framework === ComplianceFramework.GDPR_EU || framework === ComplianceFramework.GDPR_UK;
+
+    if (!isGdprFramework || items.length < 2) {
+      return items;
+    }
+
+    const sortedItems = [...items].sort(
+      (first, second) => first.start - second.start || first.end - second.end,
+    );
+    const consumedIndexes = new Set<number>();
+
+    return sortedItems.reduce<T[]>((acc, item, index) => {
+      if (consumedIndexes.has(index)) {
+        return acc;
+      }
+
+      const itemCategory = getCategory(item);
+      const isGdprPhoneEntity = GDPR_PHONE_ENTITY_CATEGORIES.includes(
+        itemCategory as (typeof GDPR_PHONE_ENTITY_CATEGORIES)[number],
+      );
+
+      if (!isGdprPhoneEntity) {
+        acc.push(item);
+        return acc;
+      }
+
+      let normalizedItem = item;
+      let normalizedEnd = item.end;
+
+      for (let nextIndex = index + 1; nextIndex < sortedItems.length; nextIndex += 1) {
+        const isConsumed = consumedIndexes.has(nextIndex);
+        const nextItem = sortedItems[nextIndex];
+        const isNationalId = getCategory(nextItem) === 'NATIONAL_ID';
+        const shouldMerge =
+          !isConsumed &&
+          isNationalId &&
+          DeIdService.shouldMergeNationalIdIntoGdprPhone(
+            text,
+            normalizedItem.start,
+            normalizedEnd,
+            nextItem.start,
+            nextItem.end,
+          );
+
+        if (shouldMerge) {
+          normalizedEnd = nextItem.end;
+          normalizedItem = updateEnd(normalizedItem, normalizedEnd);
+          consumedIndexes.add(nextIndex);
+        }
+      }
+
+      acc.push(normalizedItem);
+      return acc;
+    }, []);
+  }
+
+  private static shouldMergeNationalIdIntoGdprPhone(
+    text: string,
+    phoneStart: number,
+    phoneEnd: number,
+    nationalIdStart: number,
+    nationalIdEnd: number,
+  ): boolean {
+    if (nationalIdStart < phoneEnd) {
+      return false;
+    }
+
+    const gap = text.slice(phoneEnd, nationalIdStart);
+    if (!/^[\s().-]*$/.test(gap)) {
+      return false;
+    }
+
+    const combinedValue = text.slice(phoneStart, nationalIdEnd).trim();
+    return combinedValue.startsWith('+') && PHONE_LIKE_VALUE_PATTERN.test(combinedValue);
+  }
+
   private static sanitizeSpans(text: string, findings: AnalyzerFinding[]): AnalyzerFinding[] {
     return findings
       .map((finding) => {
@@ -912,6 +1348,32 @@ export default class DeIdService {
         return { ...finding, end: trimmedEnd };
       })
       .filter((finding) => finding.end > finding.start);
+  }
+
+  private static filterNationalIdOverlappingWithPhoneNumber(
+    findings: AnalyzerFinding[],
+  ): AnalyzerFinding[] {
+    // Remove NATIONAL_ID findings that completely overlap with phone findings.
+    // Presidio sometimes extracts digit sequences as both PHONE_NUMBER and NATIONAL_ID.
+    // Phone categories have higher semantic priority (+CC DD NNNNNNN format).
+    const phoneNumbers = findings.filter((f) =>
+      GDPR_PHONE_ENTITY_CATEGORIES.includes(
+        f.entity_type as (typeof GDPR_PHONE_ENTITY_CATEGORIES)[number],
+      ),
+    );
+
+    return findings.filter((finding) => {
+      if (finding.entity_type !== 'NATIONAL_ID') {
+        return true;
+      }
+
+      // Check if this NATIONAL_ID is completely contained within any phone finding
+      const isContainedInPhone = phoneNumbers.some(
+        (phone) => phone.start <= finding.start && finding.end <= phone.end,
+      );
+
+      return !isContainedInPhone;
+    });
   }
 
   private static extractStructuredAddressFindings(text: string): AnalyzerFinding[] {
@@ -950,6 +1412,252 @@ export default class DeIdService {
       .filter((finding): finding is AnalyzerFinding => finding !== null);
   }
 
+  private static extractStructuredPhoneFindings(
+    text: string,
+    framework: ComplianceFramework,
+  ): AnalyzerFinding[] {
+    const isGdprFramework =
+      framework === ComplianceFramework.GDPR_EU || framework === ComplianceFramework.GDPR_UK;
+
+    if (!isGdprFramework) {
+      return [];
+    }
+
+    return Array.from(text.matchAll(STRUCTURED_PHONE_LABEL_PATTERN))
+      .map((match) => {
+        if (match.index === undefined) {
+          return null;
+        }
+
+        const phoneStart = match.index + match[0].length;
+        const tail = text.slice(phoneStart);
+        const boundaryMatch = tail.match(FIELD_MARKER_BOUNDARY_PATTERN);
+        const newlineIndex = tail.indexOf('\n');
+        // Stop at the first character that cannot appear inside a phone number.
+        // This handles inline separators like "●" that are not newlines and not
+        // known field labels, but clearly terminate the phone value.
+        const nonPhoneCharMatch = tail.match(/[^+\d\s().\u002D]/u);
+        const fieldBoundaryEnd =
+          boundaryMatch && boundaryMatch.index !== undefined
+            ? phoneStart + boundaryMatch.index
+            : text.length;
+        const newlineEnd = newlineIndex !== -1 ? phoneStart + newlineIndex : text.length;
+        const nonPhoneEnd =
+          nonPhoneCharMatch && nonPhoneCharMatch.index !== undefined
+            ? phoneStart + nonPhoneCharMatch.index
+            : text.length;
+        const rawEnd = Math.min(fieldBoundaryEnd, newlineEnd, nonPhoneEnd);
+
+        const valueChunk = text.slice(phoneStart, rawEnd);
+        const leadingWhitespaceLength = valueChunk.match(/^\s*/)?.[0].length ?? 0;
+        const trailingWhitespaceLength = valueChunk.match(/[\s,;:]*$/)?.[0].length ?? 0;
+        const normalizedStart = phoneStart + leadingWhitespaceLength;
+        const normalizedEnd = rawEnd - trailingWhitespaceLength;
+        const normalizedValue = text.slice(normalizedStart, normalizedEnd);
+
+        if (normalizedEnd <= normalizedStart || !PHONE_LIKE_VALUE_PATTERN.test(normalizedValue)) {
+          return null;
+        }
+
+        return {
+          entity_type: 'PHONE_NUMBER',
+          start: normalizedStart,
+          end: normalizedEnd,
+          score: 0.99,
+        } satisfies AnalyzerFinding;
+      })
+      .filter((finding): finding is AnalyzerFinding => finding !== null);
+  }
+
+  private static extractStructuredDobFindings(text: string): AnalyzerFinding[] {
+    return Array.from(text.matchAll(STRUCTURED_DOB_LABEL_PATTERN))
+      .map((match) => {
+        if (match.index === undefined) {
+          return null;
+        }
+
+        const valueStart = match.index + match[0].length;
+        const tail = text.slice(valueStart);
+        const valueMatch = tail.match(STRUCTURED_DOB_VALUE_PREFIX_PATTERN);
+
+        if (!valueMatch) {
+          return null;
+        }
+
+        const rawValue = valueMatch[0];
+        const leadingWhitespaceLength = rawValue.match(/^\s*/)?.[0].length ?? 0;
+        const trailingWhitespaceLength = rawValue.match(/\s*$/)?.[0].length ?? 0;
+        const normalizedStart = valueStart + leadingWhitespaceLength;
+        const normalizedEnd = valueStart + rawValue.length - trailingWhitespaceLength;
+
+        if (normalizedEnd <= normalizedStart) {
+          return null;
+        }
+
+        return {
+          entity_type: 'DATE_OF_BIRTH',
+          start: normalizedStart,
+          end: normalizedEnd,
+          score: 0.99,
+        } satisfies AnalyzerFinding;
+      })
+      .filter((finding): finding is AnalyzerFinding => finding !== null);
+  }
+
+  private static extractStructuredIssueDateFindings(text: string): AnalyzerFinding[] {
+    return Array.from(text.matchAll(new RegExp(STRUCTURED_ISSUE_DATE_LABEL_PATTERN.source, 'gi')))
+      .map((match) => {
+        if (match.index === undefined) {
+          return null;
+        }
+
+        const valueStart = match.index + match[0].length;
+        const tail = text.slice(valueStart);
+        const valueMatch = tail.match(STRUCTURED_DOB_VALUE_PREFIX_PATTERN);
+
+        if (!valueMatch) {
+          return null;
+        }
+
+        const rawValue = valueMatch[0];
+        const leadingWhitespaceLength = rawValue.match(/^\s*/)?.[0].length ?? 0;
+        const trailingWhitespaceLength = rawValue.match(/\s*$/)?.[0].length ?? 0;
+        const normalizedStart = valueStart + leadingWhitespaceLength;
+        const normalizedEnd = valueStart + rawValue.length - trailingWhitespaceLength;
+
+        if (normalizedEnd <= normalizedStart) {
+          return null;
+        }
+
+        return {
+          entity_type: 'DATE_TIME',
+          start: normalizedStart,
+          end: normalizedEnd,
+          score: 0.99,
+        } satisfies AnalyzerFinding;
+      })
+      .filter((finding): finding is AnalyzerFinding => finding !== null);
+  }
+
+  private static extractStructuredNationalIdFindings(text: string): AnalyzerFinding[] {
+    const italianLabelPattern = new RegExp(ITALIAN_CODICE_FISCALE_LABEL_PATTERN.source, 'gi');
+    const codiceFiscalePattern = new RegExp(ITALIAN_CODICE_FISCALE_PATTERN.source, 'gi');
+    const germanKvLabelPattern = new RegExp(GERMAN_KV_NUMBER_LABEL_PATTERN.source, 'gi');
+    const germanKvPattern = new RegExp(GERMAN_KV_NUMBER_PATTERN.source, 'gi');
+
+    const createLabeledFindings = (labelPattern: RegExp): AnalyzerFinding[] =>
+      Array.from(text.matchAll(labelPattern)).map((match) => {
+        const matchedValue = match[1] ?? '';
+        const fullMatch = match[0];
+        const fullMatchStart = match.index ?? 0;
+        const start = fullMatchStart + fullMatch.lastIndexOf(matchedValue);
+
+        return {
+          entity_type: 'NATIONAL_ID',
+          start,
+          end: start + matchedValue.length,
+          score: 0.99,
+        } satisfies AnalyzerFinding;
+      });
+
+    const italianLabeledFindings = createLabeledFindings(italianLabelPattern);
+    const germanKvLabeledFindings = createLabeledFindings(germanKvLabelPattern);
+
+    const createStrictPatternFindings = (pattern: RegExp): AnalyzerFinding[] =>
+      Array.from(text.matchAll(pattern)).map((match) => {
+        const matchedValue = match[0];
+        const start = match.index ?? 0;
+
+        return {
+          entity_type: 'NATIONAL_ID',
+          start,
+          end: start + matchedValue.length,
+          score: 0.99,
+        } satisfies AnalyzerFinding;
+      });
+
+    const italianStrictFindings = createStrictPatternFindings(codiceFiscalePattern);
+    const germanKvStrictFindings = createStrictPatternFindings(germanKvPattern);
+
+    return DeIdService.mergeFindings(
+      DeIdService.mergeFindings(italianLabeledFindings, germanKvLabeledFindings),
+      DeIdService.mergeFindings(italianStrictFindings, germanKvStrictFindings),
+    );
+  }
+
+  private static sanitizePhoneForGdpr(phoneValue: string): string {
+    // WP29 guidance: area codes (+49 30 for Berlin, +1 212 for NYC) enable linkage attacks.
+    // Remove area code to leave only country code + minimal digits.
+    // Pattern: +CC (space|dash)? AREA-CODE (space|dash)? REST → +CC [REDACT]
+    const countryCodePattern = /^(\+\d{1,3})[\s-]?\d{1,5}[\s-]?(.*)$/;
+    const match = phoneValue.match(countryCodePattern);
+
+    if (match && match[1]) {
+      // Keep country code, rest becomes [REDACT]
+      return `${match[1]} [REDACT]`;
+    }
+
+    // Fallback: return as-is if pattern doesn't match
+    return phoneValue;
+  }
+
+  private static extractOccupationFindings(text: string): AnalyzerFinding[] {
+    const worksAsPattern = new RegExp(OCCUPATION_WORKS_AS_LABEL_PATTERN.source, 'gi');
+    const fieldLabelPattern = new RegExp(OCCUPATION_FIELD_LABEL_PATTERN.source, 'gi');
+    const socialHistoryPattern = new RegExp(OCCUPATION_SOCIAL_HISTORY_LABEL_PATTERN.source, 'gi');
+    const socialHistoryValuePattern = new RegExp(
+      OCCUPATION_SOCIAL_HISTORY_VALUE_PATTERN.source,
+      'gi',
+    );
+    const findings: AnalyzerFinding[] = [];
+
+    const addFinding = (match: RegExpExecArray, score: number): void => {
+      const valueStart = (match.index ?? 0) + match[0].length;
+      const tail = text.slice(valueStart);
+      const valueMatch = tail.match(OCCUPATION_VALUE_PREFIX_PATTERN);
+      if (!valueMatch) return;
+      const value = valueMatch[1].trimEnd();
+      if (!value) return;
+      findings.push({
+        entity_type: 'OCCUPATION',
+        start: valueStart,
+        end: valueStart + value.length,
+        score,
+      } satisfies AnalyzerFinding);
+    };
+
+    Array.from(text.matchAll(worksAsPattern)).forEach((match) => {
+      addFinding(match, 0.9);
+    });
+    Array.from(text.matchAll(fieldLabelPattern)).forEach((match) => {
+      addFinding(match, 0.95);
+    });
+    Array.from(text.matchAll(socialHistoryPattern)).forEach((match) => {
+      const sectionStart = (match.index ?? 0) + match[0].length;
+      const tail = text.slice(sectionStart);
+      const sectionMarkerMatch = tail.match(FIELD_MARKER_BOUNDARY_PATTERN);
+      const section = tail.slice(0, sectionMarkerMatch?.index ?? tail.length);
+
+      Array.from(section.matchAll(socialHistoryValuePattern)).forEach((segmentMatch) => {
+        const value = segmentMatch[1]?.trim();
+        const segmentStart = segmentMatch.index ?? 0;
+
+        if (!value) {
+          return;
+        }
+
+        findings.push({
+          entity_type: 'OCCUPATION',
+          start: sectionStart + segmentStart,
+          end: sectionStart + segmentStart + value.length,
+          score: 0.88,
+        } satisfies AnalyzerFinding);
+      });
+    });
+
+    return findings;
+  }
+
   private static clampEndToFieldMarker(text: string, start: number, end: number): number {
     const value = text.substring(start, end);
     const markerIdx = value.search(FIELD_MARKER_BOUNDARY_PATTERN);
@@ -970,7 +1678,7 @@ export default class DeIdService {
   private static clampStartAfterFieldMarker(text: string, start: number, end: number): number {
     const value = text.substring(start, end);
     const markerPrefixMatch = value.match(
-      /^\s*(?:Clinic|Date of Service|Provider|Patient Name|Name|DOB|Date of Birth|SSN|MRN|Gender|Sex|Address|Phone)\s*:\s*/i,
+      /^\s*(?:Clinic|Date of Service|Provider|Patient Name|Name|DOB|Date of Birth|SSN|MRN|Gender|Sex|Address|Phone|Contact)\s*:\s*/i,
     );
 
     if (!markerPrefixMatch) {
@@ -1001,6 +1709,8 @@ export default class DeIdService {
 
     const prioritizedSpans = sanitizedSpans.sort(
       (first, second) =>
+        DeIdService.getPreviewCategoryPriority(second.category) -
+          DeIdService.getPreviewCategoryPriority(first.category) ||
         second.confidence - first.confidence ||
         second.end - second.start - (first.end - first.start) ||
         first.start - second.start ||
@@ -1016,6 +1726,10 @@ export default class DeIdService {
 
       return acc;
     }, []);
+  }
+
+  private static getPreviewCategoryPriority(category: string): number {
+    return PREVIEW_CATEGORY_PRIORITY[category] ?? 100;
   }
 
   private static shouldKeepNonPhiGenderValue(
@@ -1050,19 +1764,37 @@ export default class DeIdService {
   }
 
   private static extractClinicHeaderOrganizations(text: string): AnalyzerFinding[] {
-    return Array.from(text.matchAll(CLINIC_HEADER_ORGANIZATION_PATTERN)).map((match) => {
+    const clinicHeaderFindings = Array.from(text.matchAll(CLINIC_HEADER_ORGANIZATION_PATTERN)).map(
+      (match) => {
+        const matchedValue = match[1];
+        const fullMatch = match[0];
+        const fullMatchStart = match.index ?? 0;
+        const organizationStart = fullMatchStart + fullMatch.indexOf(matchedValue);
+
+        return {
+          entity_type: ORGANIZATION_ENTITY_TYPE,
+          start: organizationStart,
+          end: organizationStart + matchedValue.length,
+          score: 0.99,
+        };
+      },
+    );
+
+    const highRiskFacilityFindings = Array.from(
+      text.matchAll(HIGH_RISK_FACILITY_ORGANIZATION_PATTERN),
+    ).map((match) => {
       const matchedValue = match[1];
-      const fullMatch = match[0];
-      const fullMatchStart = match.index ?? 0;
-      const organizationStart = fullMatchStart + fullMatch.indexOf(matchedValue);
+      const start = match.index ?? 0;
 
       return {
         entity_type: ORGANIZATION_ENTITY_TYPE,
-        start: organizationStart,
-        end: organizationStart + matchedValue.length,
+        start,
+        end: start + matchedValue.length,
         score: 0.99,
       };
     });
+
+    return DeIdService.mergeFindings(clinicHeaderFindings, highRiskFacilityFindings);
   }
 
   private static hasOverlap(
@@ -1123,13 +1855,46 @@ export default class DeIdService {
       const context = text.substring(contextStart, contextEnd).toLowerCase();
       const isNumericToken = /^\d+$/.test(foundText);
 
+      if (finding.entity_type === 'DATE_TIME') {
+        const digitsOnlyLength = foundText.replace(/\D/g, '').length;
+        const looksLikeDateToken =
+          ABSOLUTE_DATE_PATTERN.test(rawFoundText) ||
+          STRICT_DATE_TOKEN_PATTERN.test(rawFoundText) ||
+          TEXTUAL_MONTH_PATTERN.test(rawFoundText);
+        const looksLikePhoneToken = PHONE_LIKE_VALUE_PATTERN.test(rawFoundText);
+        const hasPhoneContext = PHONE_CONTEXT_KEYWORDS.some((keyword) => context.includes(keyword));
+
+        if (!looksLikeDateToken && digitsOnlyLength >= 8) {
+          this.logger.debug(`Filtered: DATE_TIME "${foundText}" is a long non-date numeric token`);
+          return false;
+        }
+
+        if (looksLikePhoneToken && hasPhoneContext) {
+          this.logger.debug(`Filtered: DATE_TIME "${foundText}" overlaps phone-like value`);
+          return false;
+        }
+      }
+
       if (finding.entity_type === 'DATE_TIME' && ABSOLUTE_DATE_PATTERN.test(rawFoundText)) {
+        return true;
+      }
+
+      if (
+        finding.entity_type === 'DATE_TIME' &&
+        DATE_TIME_CONTEXT_KEYWORDS.some((kw) => context.includes(kw))
+      ) {
         return true;
       }
 
       // Skip if text is in Allow List
       if (isInMedicalAllowlist(foundText)) {
         this.logger.debug(`Filtered: "${foundText}" is in medical allowlist`);
+        return false;
+      }
+
+      // Filter ICD-10 diagnosis codes (e.g. E03.9, J18.0) — not PHI
+      if (/^[a-z]\d{2}(?:\.\d{1,4})?$/.test(foundText)) {
+        this.logger.debug(`Filtered: "${foundText}" matches ICD-10 code pattern`);
         return false;
       }
 
@@ -1159,7 +1924,8 @@ export default class DeIdService {
           .substring(Math.max(0, finding.start - 120), Math.min(text.length, finding.end + 120))
           .toLowerCase();
         const hasStreetPattern =
-          /\b\d+\s+\w+\s+(?:st|ave|blvd|dr|rd|ln|way|pl|street|avenue)\b/i.test(wideContext);
+          /\b\d+\s+\w+\s+(?:st|ave|blvd|dr|rd|ln|way|pl|street|avenue)\b/i.test(wideContext) ||
+          /\b(?:via|corso|piazza|viale|vicolo|largo|strada)\s+[a-z]/i.test(wideContext);
         if (hasStreetPattern) {
           // If there is a street in the context — forcibly consider it as ADDRESS (high risk)
           return true;

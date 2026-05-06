@@ -12,6 +12,7 @@ export interface ValidationResult {
 export interface ValidationOptions {
   strict?: boolean;
   allowZip3?: boolean;
+  skipPatternTypes?: ReadonlyArray<string>;
 }
 
 type PhiPattern = {
@@ -71,6 +72,10 @@ function isSafeZip(text: string, index: number, allowZip3 = false): boolean {
 
 function collectLeaks(text: string, options: ValidationOptions): Leak[] {
   return PHI_PATTERNS.reduce<Leak[]>((acc, pattern) => {
+    if (options.skipPatternTypes?.includes(pattern.type)) {
+      return acc;
+    }
+
     const matches = Array.from(text.matchAll(pattern.regex));
     const leaksForPattern = matches
       .map((match): Leak | null => {
@@ -96,7 +101,7 @@ function collectLeaks(text: string, options: ValidationOptions): Leak[] {
 export function validatePhi(text: string, options: ValidationOptions = {}): ValidationResult {
   const strict = options.strict ?? true;
   const allowZip3 = options.allowZip3 ?? false;
-  const leaks = collectLeaks(text, { allowZip3 });
+  const leaks = collectLeaks(text, { allowZip3, skipPatternTypes: options.skipPatternTypes });
 
   const result: ValidationResult = {
     valid: leaks.length === 0,
