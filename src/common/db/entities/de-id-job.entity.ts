@@ -8,7 +8,7 @@ import {
   JoinColumn,
   Index,
 } from 'typeorm';
-import { ComplianceFramework } from '../../constants/compliance.constants';
+import { ComplianceFramework } from '@common/constants/compliance.constants';
 import type DetectedEntity from './detected-entity.entity';
 import type User from './user.entity';
 
