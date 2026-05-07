@@ -10,7 +10,7 @@ import RemoteNlpClient from './remote-nlp.client';
 import AuthModule from '../auth/auth.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([DeIdJob, DetectedEntity]), AuthModule ],
+  imports: [TypeOrmModule.forFeature([DeIdJob, DetectedEntity]), AuthModule],
   controllers: [DeIdController],
   providers: [DeIdService, StatsService, PresidioClient, RemoteNlpClient],
   exports: [DeIdService],
