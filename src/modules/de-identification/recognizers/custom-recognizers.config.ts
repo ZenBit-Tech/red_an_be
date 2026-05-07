@@ -8,8 +8,267 @@ export type CustomRecognizer = {
   name: string;
   supported_language: string;
   supported_entity: string;
-  patterns: RecognizerPattern[];
+  patterns?: RecognizerPattern[];
+  deny_list?: string[];
   context?: string[];
+};
+
+export const HIPAA_ANALYZER_ALLOW_LIST: string[] = [
+  'daily',
+  'weekly',
+  'monthly',
+  'today',
+  'weeks',
+  'hours',
+  'MD',
+  'age',
+  'years old',
+  'mg',
+  'mmHg',
+  'PO',
+  'PRN',
+  'max',
+  'dose',
+  'doses',
+  'per',
+  'hr',
+  'hrs',
+  'HEENT',
+];
+
+export const GDPR_EU_ANALYZER_ALLOW_LIST: string[] = [
+  'PHQ-9',
+  'PHQ-2',
+  'GAD-7',
+  'GAD-2',
+  'HAM-A',
+  'HDRS',
+  'MMSE',
+  'MoCA',
+  'CAGE',
+  'AUDIT',
+  'Spirometry',
+  'ECG',
+  'EKG',
+  'Gastroscopy',
+  'Colonoscopy',
+  'MRI',
+  'CT',
+  'mmol/L',
+  'mg/dL',
+  'mmHg',
+  'U/L',
+  'IU/L',
+  'ng/mL',
+  'micromol/L',
+];
+
+// ---------------------------------------------------------------------------
+// Medical Allow List for HIPAA – words/phrases that MUST NOT be redacted
+// ---------------------------------------------------------------------------
+export const MEDICAL_ALLOWLIST: Record<string, string[]> = {
+  units: ['mg', 'ml', 'g', 'kg', 'l', 'units', 'tabs', 'tablets', 'cc', 'gr', 'tsp', 'tbsp'],
+  frequencies: [
+    'daily',
+    'twice',
+    'morning',
+    'evening',
+    'afternoon',
+    'bedtime',
+    'bid',
+    'tid',
+    'qid',
+    'qh',
+  ],
+  timeframes: [
+    'today',
+    'weeks',
+    'months',
+    'years old',
+    'year',
+    'day',
+    'week',
+    'month',
+    'hour',
+    'hours',
+    'days',
+  ],
+  descriptors: ['each', 'per', 'every', 'before', 'after', 'with', 'without', 'as needed', 'prn'],
+  routes: [
+    'orally',
+    'iv',
+    'im',
+    'sc',
+    'subq',
+    'topical',
+    'sublingual',
+    'intramuscular',
+    'intravenous',
+  ],
+  demographics: ['age'],
+  credentials: ['md', 'do', 'np'],
+  anatomy: ['heent'],
+  clinical_scales: [
+    'PHQ-9',
+    'PHQ-2',
+    'GAD-7',
+    'GAD-2',
+    'HAM-A',
+    'HDRS',
+    'MMSE',
+    'MoCA',
+    'CAGE',
+    'AUDIT',
+  ],
+  procedures: ['gastroscopy', 'colonoscopy', 'mri', 'ct', 'spirometry', 'ecg', 'ekg'],
+};
+
+/**
+ * Check if a token is in the medical allow list (case-insensitive)
+ */
+export const isInMedicalAllowlist = (token: string): boolean => {
+  const lowerToken = token.toLowerCase().trim();
+  return Object.values(MEDICAL_ALLOWLIST).some((group) =>
+    group.some((item) => item.toLowerCase() === lowerToken),
+  );
+};
+
+/**
+ * Check if text is a medical measurement (number + unit) that should be preserved
+ * Examples: "50 mg", "2 tablets", "5ml"
+ */
+export const isMedicalMeasurement = (text: string): boolean => {
+  const measurementRegex = /^\d{1,3}\s*(?:mg|ml|g|kg|l|units|tabs|tablets|cc|gr|tsp|tbsp)$/i;
+  return measurementRegex.test(text.trim());
+};
+
+// ---------------------------------------------------------------------------
+// HIPAA CUSTOM RECOGNIZERS – Enhanced for Medical Text Processing
+// ---------------------------------------------------------------------------
+
+const medicalDosageRecognizer: CustomRecognizer = {
+  name: 'Medical Dosage Number Recognizer',
+  supported_language: 'en',
+  supported_entity: 'MEDICAL_DOSAGE',
+  patterns: [
+    {
+      name: 'dosage_with_unit_prefix',
+      // Captures: "50mg", "2 tablets", "5 ml"
+      regex: '\\b(\\d{1,3})\\s*(?:mg|ml|g|kg|l|units|tabs?|tablets|cc|gr|tsp|tbsp)\\b',
+      score: 0.9,
+    },
+    {
+      name: 'dosage_with_frequency',
+      // Captures: "take 2 tablets daily", "dose 50mg twice"
+      regex:
+        '\\b(?:take|give|dose|administer|apply|inject)\\s+(\\d{1,3})\\s+(?:mg|ml|tablets|units|drops)\\s+(?:daily|bid|tid|qid|morning|evening)\\b',
+      score: 0.95,
+    },
+    {
+      name: 'quantity_descriptor',
+      // Captures: "one tablet", "two pills", "three capsules"
+      regex:
+        '\\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\\s+(?:tablet|pill|capsule|drop|dose|unit)s?\\b',
+      score: 0.85,
+    },
+  ],
+  context: [
+    'dose',
+    'dosage',
+    'medication',
+    'drug',
+    'medicine',
+    'tablet',
+    'ml',
+    'mg',
+    'take',
+    'administer',
+  ],
+};
+
+const usSsnFullRecognizer: CustomRecognizer = {
+  name: 'US SSN Full Match Recognizer',
+  supported_language: 'en',
+  supported_entity: 'US_SSN_FULL',
+  patterns: [
+    {
+      name: 'ssn_strict_full_match',
+      // Strict SSN match: 123-45-6789
+      regex: '\\b\\d{3}-\\d{2}-\\d{4}\\b',
+      score: 0.98,
+    },
+  ],
+  context: ['ssn', 'social', 'security', 'patient', 'id', 'number', 'identifier'],
+};
+
+const usZipRecognizer: CustomRecognizer = {
+  name: 'US ZIP Code Recognizer',
+  supported_language: 'en',
+  supported_entity: 'US_ZIP',
+  patterns: [
+    {
+      name: 'us_zip_with_optional_extension',
+      regex: '\\b\\d{5}(?:-\\d{4})?\\b',
+      score: 0.92,
+    },
+  ],
+  context: ['zip', 'zip code', 'zipcode', 'postal', 'address', 'street', 'city'],
+};
+
+const clinicOrganizationRecognizer: CustomRecognizer = {
+  name: 'Clinic Organization Recognizer',
+  supported_language: 'en',
+  supported_entity: 'ORGANIZATION',
+  patterns: [
+    {
+      name: 'clinic_header_line',
+      // catch header-style lines: "Clinic: Vasquez Primary Care Associates"
+      regex: '\\bClinic:\\s*[A-Z][A-Za-z.&-]+(?:\\s+[A-Z][A-Za-z.&-]+){1,6}\\b',
+      score: 0.95,
+    },
+    {
+      name: 'clinic_suffix_pattern',
+      // catch: "Vasquez Primary Care Associates", "St. Mary Medical Center", etc.
+      regex:
+        '\\b[A-Z][A-Za-z]+(?:\\s+[A-Za-z]+){1,4}\\s+(?:Associates|Medical Center|Health System|Care Center|Family Medicine|Urgent Care|Institute|Health Services|Healthcare|Physicians)\\b',
+      score: 0.88,
+    },
+    {
+      name: 'primary_care_associates_with_optional_location',
+      // catch: "Clinic: Vasquez Primary Care Associates, Chicago, IL"
+      regex:
+        '\\b(?:Clinic:\\s*)?[A-Z][A-Za-z.&-]+(?:\\s+[A-Z][A-Za-z.&-]+){0,3}\\s+Primary\\s+Care\\s+Associates(?:\\s*,\\s*[A-Z][A-Za-z]+(?:\\s+[A-Z][A-Za-z]+)*\\s*,\\s*[A-Z]{2})?\\b',
+      score: 0.97,
+    },
+    {
+      name: 'primary_care_pattern',
+      regex: '\\b[A-Z][A-Za-z]+(?:\\s+[A-Za-z]+){0,3}\\s+Primary\\s+Care(?:\\s+Associates)?\\b',
+      score: 0.92,
+    },
+    {
+      name: 'policlinico_university_connector_pattern',
+      regex:
+        '\\bPoliclinico\\s+[A-Z][A-Za-z]*(?:\\s+(?:[A-Z][A-Za-z]*|[IVX]{1,4}))*(?:\\s*(?:–|-|,)\\s*(?:[A-Z][A-Za-z]+(?:\\s+[A-Za-z]+)*)?\\s*University(?:\\s+of\\s+[A-Z][A-Za-z]+(?:\\s+[A-Za-z]+)*)?)\\b',
+      score: 0.9,
+    },
+    {
+      name: 'charite_hospital_name_pattern',
+      regex: '\\bCharit(?:e|\\u00e9)\\b',
+      score: 0.99,
+    },
+    {
+      name: 'charite_university_hospital_chain_pattern',
+      regex:
+        '\\bCharit(?:e|\\u00e9)\\s*(?:–|-|,)\\s*Universit(?:aets|ats|\\u00e4ts)?medizin\\s+[A-Z][A-Za-z]+(?:\\s+[A-Z][A-Za-z]+){0,2}\\b',
+      score: 0.995,
+    },
+    {
+      name: 'german_university_hospital_chain_pattern',
+      regex:
+        '\\b(?:Universit(?:aets|ats|\\u00e4ts)?medizin|Klinikum|Krankenhaus)\\s+[A-Z][A-Za-z]+(?:\\s+[A-Z][A-Za-z]+){0,4}\\b',
+      score: 0.93,
+    },
+  ],
 };
 
 // HIPAA custom recognizers (not built-in to Presidio)
@@ -94,6 +353,26 @@ const biometricIdRecognizer: CustomRecognizer = {
   context: ['fingerprint', 'retina', 'iris', 'biometric', 'facial', 'recognition', 'scan'],
 };
 
+const occupationRecognizerHipaa: CustomRecognizer = {
+  name: 'Occupation Recognizer HIPAA',
+  supported_language: 'en',
+  supported_entity: 'OCCUPATION',
+  patterns: [
+    {
+      name: 'occupation_field_value',
+      regex: '\\b(?:Occupation|Profession|Employment|Job)\\s*:\\s*[A-Za-z][A-Za-z\\s-]{1,40}\\b',
+      score: 0.9,
+    },
+    {
+      name: 'works_as_phrase',
+      regex:
+        '\\b(?:works|worked|employed|serves)\\s+as\\s+(?:an?\\s+)?[A-Za-z][A-Za-z\\s-]{1,40}\\b',
+      score: 0.88,
+    },
+  ],
+  context: ['social history', 'occupation', 'profession', 'employment', 'job', 'works as'],
+};
+
 // GDPR EU custom recognizers
 
 const euVatNumberRecognizer: CustomRecognizer = {
@@ -126,6 +405,28 @@ const nationalIdRecognizer: CustomRecognizer = {
   context: ['national', 'identity', 'id card', 'identification', 'citizen', 'passport'],
 };
 
+const germanHealthInsuranceNumberRecognizer: CustomRecognizer = {
+  name: 'German Health Insurance Number Recognizer',
+  supported_language: 'en',
+  supported_entity: 'NATIONAL_ID',
+  patterns: [
+    {
+      name: 'German KV number',
+      regex: '\\b[A-Z]\\d{9}\\b',
+      score: 0.95,
+    },
+  ],
+  context: [
+    'kv',
+    'kv-nr',
+    'krankenkasse',
+    'krankenversicherung',
+    'insurance',
+    'versichertennummer',
+    'health insurance',
+  ],
+};
+
 const bankAccountRecognizer: CustomRecognizer = {
   name: 'Bank Account Number Recognizer',
   supported_language: 'en',
@@ -149,12 +450,6 @@ const biologicalDataRecognizer: CustomRecognizer = {
       name: 'ICD-10 code',
       regex: '\\b[A-Z][0-9]{2}(?:\\.[0-9]{1,4})?\\b',
       score: 0.7,
-    },
-    {
-      name: 'Lab result value',
-      regex:
-        '\\b\\d+(?:\\.\\d+)?\\s*(?:mg\\/(?:dL|L)|mmol\\/L|micromol\\/L|ng\\/mL|U\\/L|IU\\/L)\\b',
-      score: 0.8,
     },
   ],
   context: ['blood', 'lab', 'test', 'result', 'diagnosis', 'condition', 'medical', 'specimen'],
@@ -180,7 +475,7 @@ const cookieIdRecognizer: CustomRecognizer = {
 };
 
 // ---------------------------------------------------------------------------
-// UK GDPR – кастомні recognizers (специфічні британські ідентифікатори)
+// UK GDPR – custom recognizers (specific British identifiers)
 // ---------------------------------------------------------------------------
 
 const ukNhsNumberRecognizer: CustomRecognizer = {
@@ -298,8 +593,28 @@ const ageRecognizer: CustomRecognizer = {
       regex: '\\b\\d{1,3}\\s+yrs?\\.?(?:\\s+old)?\\b',
       score: 0.75,
     },
+    {
+      name: 'Age label format',
+      regex: '(?:\\(Age:\\s*\\d{1,3}\\)|\\bAge:\\s*\\d{1,3}\\b)',
+      score: 0.88,
+    },
   ],
   context: ['age', 'aged', 'old', 'year', 'years', 'yrs', 'born', 'birth', 'patient'],
+};
+
+const genderRecognizer: CustomRecognizer = {
+  name: 'Gender Recognizer',
+  supported_language: 'en',
+  supported_entity: 'GENDER',
+  patterns: [
+    {
+      name: 'Gender label format',
+      regex: '\\b(?:Gender|Sex):\\s*(?:Male|Female|Non-binary|Other)\\b',
+      score: 0.9,
+    },
+  ],
+  deny_list: ['Male', 'Female', 'Non-binary', 'Other'],
+  context: ['gender', 'sex', 'male', 'female', 'non-binary'],
 };
 
 // ---------------------------------------------------------------------------
@@ -390,26 +705,171 @@ const tradeUnionRecognizer: CustomRecognizer = {
 };
 
 // ---------------------------------------------------------------------------
+// GDPR EU – Italian Codice Fiscale
+// ---------------------------------------------------------------------------
+
+const italianCodiceFiscaleRecognizer: CustomRecognizer = {
+  name: 'Italian Codice Fiscale Recognizer',
+  supported_language: 'en',
+  supported_entity: 'NATIONAL_ID',
+  patterns: [
+    {
+      name: 'Codice Fiscale',
+      regex: '\\b[A-Z]{6,7}\\d{2}[A-EHLMPRST]\\d{2}[A-Z]\\d{3}[A-Z]\\b',
+      score: 0.97,
+    },
+  ],
+  context: ['codice', 'fiscale', 'cf', 'tax', 'italian'],
+};
+
+// ---------------------------------------------------------------------------
+// Italian address recognizer – catches Via/Corso/Piazza street formats
+const italianAddressRecognizer: CustomRecognizer = {
+  name: 'Italian Address Recognizer',
+  supported_language: 'en',
+  supported_entity: 'ADDRESS',
+  patterns: [
+    {
+      name: 'italian_street_with_number',
+      regex:
+        '\\b(?:Via|Corso|Piazza|Viale|Vicolo|Largo|Strada)\\s+[A-Za-z][A-Za-z\\s]+\\d+(?:,?\\s*\\d{5})?\\b',
+      score: 0.9,
+    },
+  ],
+  context: ['address', 'via', 'corso', 'piazza', 'residenza', 'indirizzo', 'domicilio'],
+};
+
+const clinicalDateRecognizer: CustomRecognizer = {
+  name: 'Clinical Date Recognizer',
+  supported_language: 'en',
+  supported_entity: 'DATE_TIME',
+  patterns: [
+    {
+      name: 'day_month_name_year',
+      regex:
+        '\\b\\d{1,2}\\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\\s+\\d{4}\\b',
+      score: 0.95,
+    },
+    {
+      name: 'month_name_day_year',
+      regex:
+        '\\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\\s+\\d{1,2},?\\s+\\d{4}\\b',
+      score: 0.95,
+    },
+    {
+      name: 'numeric_date_dmy',
+      regex: '\\b\\d{1,2}[/.\\-]\\d{1,2}[/.\\-]\\d{4}\\b',
+      score: 0.92,
+    },
+  ],
+  context: [
+    'date',
+    'consultation',
+    'visit',
+    'appointment',
+    'admission',
+    'discharge',
+    'issue',
+    'issued',
+    'document',
+    'report',
+    'of issue',
+  ],
+};
+
+// ---------------------------------------------------------------------------
+// GDPR EU – Polish healthcare facility recognizer
+// ---------------------------------------------------------------------------
+
+const polishHealthcareFacilityRecognizer: CustomRecognizer = {
+  name: 'Polish Healthcare Facility Recognizer',
+  supported_language: 'en',
+  supported_entity: 'ORGANIZATION',
+  patterns: [
+    {
+      name: 'central_clinical_hospital_warsaw',
+      regex: '\\bCentral\\s+Clinical\\s+Hospital(?:\\s+of\\s+(?:the\\s+)?[A-Z][A-Za-z\\s]+)?\\b',
+      score: 0.98,
+    },
+    {
+      name: 'healthcare_facility_of_university',
+      regex:
+        '\\b[A-Z][A-Za-z\\s]+(?:Hospital|Clinic|Centre|Center)\\s+of\\s+(?:the\\s+)?(?:[A-Z][A-Za-z]+\\s+){1,4}(?:University|Medical|Institute)(?:\\s+of\\s+[A-Z][A-Za-z]+(?:\\s+[A-Za-z]+)*)?\\b',
+      score: 0.93,
+    },
+    {
+      name: 'polish_hospital_or_clinic_prefix',
+      regex: '\\b(?:Szpital|Klinika|Centrum\\s+Medyczne|Instytut)(?:\\s+[A-Z][A-Za-z]+){1,5}\\b',
+      score: 0.9,
+    },
+    {
+      name: 'uck_wum_abbreviation',
+      regex: '\\b(?:UCK\\s+WUM|UCK|WUM)\\b',
+      score: 0.97,
+    },
+  ],
+  context: ['hospital', 'clinic', 'facility', 'medical', 'healthcare', 'university', 'warsaw'],
+};
+
+// ---------------------------------------------------------------------------
+// GDPR EU – Polish phone number recognizer (+48 XXX XXX XXX)
+// ---------------------------------------------------------------------------
+
+const polishPhoneRecognizer: CustomRecognizer = {
+  name: 'Polish Phone Number Recognizer',
+  supported_language: 'en',
+  supported_entity: 'PL_PHONE_NUMBER',
+  patterns: [
+    {
+      name: 'pl_phone_with_country_code',
+      regex: '\\+48[\\s-]?\\d{3}[\\s-]?\\d{3}[\\s-]?\\d{3}\\b',
+      score: 0.97,
+    },
+    {
+      name: 'pl_phone_local_9_digits',
+      regex: '\\b0?\\d{3}[\\s-]\\d{3}[\\s-]\\d{3}\\b',
+      score: 0.75,
+    },
+  ],
+  context: ['phone', 'tel', 'contact', 'mobile', 'number', 'call', 'telephone'],
+};
+
+// ---------------------------------------------------------------------------
 // Custom recognizers by framework
 export const HIPAA_CUSTOM_RECOGNIZERS: CustomRecognizer[] = [
+  medicalDosageRecognizer,
+  clinicalDateRecognizer,
+  usSsnFullRecognizer,
+  usZipRecognizer,
+  clinicOrganizationRecognizer,
   medicalRecordNumberRecognizerHippa,
   healthPlanBeneficiaryRecognizer,
   vehicleIdRecognizer,
   deviceIdRecognizer,
   biometricIdRecognizer,
+  occupationRecognizerHipaa,
 ];
 
 export const GDPR_EU_CUSTOM_RECOGNIZERS: CustomRecognizer[] = [
+  clinicalDateRecognizer,
   euVatNumberRecognizer,
   nationalIdRecognizer,
+  germanHealthInsuranceNumberRecognizer,
+  italianCodiceFiscaleRecognizer,
   bankAccountRecognizer,
   biologicalDataRecognizer,
   cookieIdRecognizer,
   deviceIdRecognizer,
   ageRecognizer,
+  genderRecognizer,
+  clinicOrganizationRecognizer,
+  italianAddressRecognizer,
+  polishHealthcareFacilityRecognizer,
+  polishPhoneRecognizer,
 ];
 
 export const GDPR_UK_CUSTOM_RECOGNIZERS: CustomRecognizer[] = [
+  clinicalDateRecognizer,
   ukNhsNumberRecognizer,
   ukNinoRecognizer,
   ukPostcodeRecognizer,

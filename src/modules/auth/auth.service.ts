@@ -3,14 +3,14 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
 import * as crypto from 'crypto';
-import TemplateUser from '@db/entities/user.entity';
+import User from '@common/db/entities/user.entity';
 import MailService from '../mail/mail.service';
 
 @Injectable()
 export default class AuthService {
   constructor(
-    @InjectRepository(TemplateUser)
-    private readonly userRepository: Repository<TemplateUser>,
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
     private readonly jwtService: JwtService,
     private readonly mailService: MailService,
   ) {}
@@ -25,7 +25,7 @@ export default class AuthService {
       await this.userRepository
         .createQueryBuilder()
         .insert()
-        .into(TemplateUser)
+        .into(User)
         .values({ email })
         .execute();
 
@@ -39,7 +39,7 @@ export default class AuthService {
 
     await this.userRepository
       .createQueryBuilder()
-      .update(TemplateUser)
+      .update(User)
       .set({ magicLinkToken: magicToken })
       .where('uuid = :uuid', { uuid: user!.uuid })
       .execute();
@@ -59,7 +59,7 @@ export default class AuthService {
 
     await this.userRepository
       .createQueryBuilder()
-      .update(TemplateUser)
+      .update(User)
       .set({ magicLinkToken: () => 'NULL' })
       .where('uuid = :uuid', { uuid: user.uuid })
       .execute();

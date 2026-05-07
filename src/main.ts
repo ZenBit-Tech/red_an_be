@@ -33,7 +33,9 @@ function resolveCorsOrigins(configService: ConfigService): string[] {
 }
 
 async function bootstrap() {
-  await ensureDatabase();
+  if (process.env.NODE_ENV !== 'production') {
+    await ensureDatabase();
+  }
 
   const app = await NestFactory.create(AppModule, { rawBody: true });
   const configService = new ConfigService();
@@ -50,6 +52,7 @@ async function bootstrap() {
     .setTitle(`${APP_NAME} API`)
     .setDescription(APP_DESCRIPTION)
     .setVersion(APP_VERSION)
+    .addBearerAuth()
     .build();
 
   const document = SwaggerModule.createDocument(app, swaggerConfig);
@@ -63,7 +66,8 @@ async function bootstrap() {
     }),
   );
 
-  await app.listen(configService.getOrThrow<number>('PORT') ?? DEFAULT_PORT);
+  const port = configService.get<number>('PORT') || process.env.PORT || DEFAULT_PORT;
+  await app.listen(port, '0.0.0.0');
 }
 
 bootstrap().catch((e) => {

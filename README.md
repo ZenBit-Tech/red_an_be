@@ -1,6 +1,6 @@
 # red-an-be
 
-A production-ready NestJS backend template with TypeORM (MySQL), ESLint (Airbnb rules), Husky, Swagger, and a fully working example module.
+A production-ready NestJS backend with TypeORM (MySQL), ESLint (Airbnb rules), Husky, Swagger, magic-link authentication, and de-identification APIs.
 
 ---
 
@@ -24,20 +24,33 @@ src/
 │   ├── db/
 │   │   ├── datasource.ts             # TypeORM DataSource config
 │   │   └── entities/
-│   │       └── example.user.entity.ts
+│   │       ├── de-id-job.entity.ts
+│   │       ├── detected-entity.entity.ts
+│   │       └── user.entity.ts
 │   └── utils/
 │       └── isMySqlError.ts           # MySQL error type guard
 ├── migrations/
 │   └── <timestamp>-Init.ts           # Generated migrations go here
 ├── modules/
-│   ├── example-user/                 # ← Use this as a module template
+│   ├── auth/
+│   │   ├── decorators/
+│   │   ├── guards/
+│   │   ├── strategies/
+│   │   ├── types/
+│   │   ├── auth.controller.ts
+│   │   ├── auth.module.ts
+│   │   └── auth.service.ts
+│   ├── de-identification/
+│   │   ├── context/
 │   │   ├── dto/
-│   │   │   ├── createExampleUser.dto.ts
-│   │   │   └── returnExampleUser.dto.ts
-│   │   ├── example.user.constants.ts
-│   │   ├── example.user.controller.ts
-│   │   ├── example.user.module.ts
-│   │   └── example.user.service.ts
+│   │   ├── recognizers/
+│   │   ├── strategies/
+│   │   ├── de-identification.controller.ts
+│   │   ├── de-identification.module.ts
+│   │   ├── de-identification.service.ts
+│   │   ├── presidio.client.ts
+│   │   ├── remote-nlp.client.ts
+│   │   └── stats.service.ts
 │   └── mail/
 │       ├── mail.constants.ts
 │       ├── mail.module.ts
@@ -50,18 +63,6 @@ src/
 ├── app.service.ts
 └── main.ts
 ```
-
-### Module Example
-
-The `example-user` module demonstrates the standard pattern for all modules:
-
-| File                 | Purpose                             |
-| -------------------- | ----------------------------------- |
-| `*.module.ts`        | Registers entity, service, exports  |
-| `*.controller.ts`    | Route handlers + Swagger decorators |
-| `*.service.ts`       | Business logic using Query Builder  |
-| `dto/create*.dto.ts` | Request body validation             |
-| `dto/return*.dto.ts` | Response shape (with @Expose())     |
 
 ---
 
@@ -84,6 +85,8 @@ Edit `.env` with your MySQL credentials:
 ```env
 PORT=3000
 NODE_ENV=development
+JWT_SECRET=replace_with_strong_random_secret
+JWT_EXPIRATION=3600
 
 DB_TYPE=mysql
 DB_HOST=localhost
@@ -151,19 +154,17 @@ http://localhost:3000/api
 
 This project uses **TypeORM with Query Builder** — no `.find()` / `.save()` shortcuts.
 
-All DB operations go through `createQueryBuilder()`. Example from `example.user.service.ts`:
+All DB operations go through `createQueryBuilder()`. Example from `auth.service.ts`:
 
 ```ts
 // SELECT
-const users = await this.userRepository.createQueryBuilder('templateUser').getMany();
+const user = await this.userRepository
+  .createQueryBuilder('user')
+  .where('user.email = :email', { email })
+  .getOne();
 
 // INSERT
-await this.userRepository
-  .createQueryBuilder()
-  .insert()
-  .into(TemplateUser)
-  .values([{ email }])
-  .execute();
+await this.userRepository.createQueryBuilder().insert().into(User).values({ email }).execute();
 ```
 
 ### Migrations

@@ -1,5 +1,8 @@
-import { Body, Controller, Get, Post } from '@nestjs/common';
-import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import JwtAuthGuard from '../auth/guards/jwt-auth.guard';
+import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import DeIdService from './de-identification.service';
 import { AnalyzeRequestDto, PreviewRequestDto } from './dto/request.dto';
 import {
@@ -7,12 +10,14 @@ import {
   PreviewResponseDto,
   RemoteNlpHealthResponseDto,
 } from './dto/response.dto';
+import { DeIdStatsQueryDto } from './dto/stats-query.dto';
 import { DeIdStatsResponseDto } from './dto/stats-response.dto';
 import StatsService from './stats.service';
 
 @ApiTags('De-Identification')
+@ApiBearerAuth()
 @Controller('de-identification')
-// TODO(auth): protect this controller with an auth guard once the auth PR is merged.
+@UseGuards(JwtAuthGuard)
 export default class DeIdController {
   constructor(
     private readonly deIdService: DeIdService,
@@ -22,15 +27,21 @@ export default class DeIdController {
   @Post('analyze')
   @ApiOperation({ summary: 'Step 2-3: Run PII Analysis' })
   @ApiOkResponse({ type: AnalyzeResponseDto })
-  async analyze(@Body() dto: AnalyzeRequestDto): Promise<AnalyzeResponseDto> {
-    return this.deIdService.analyzeText(dto);
+  async analyze(
+    @Body() dto: AnalyzeRequestDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<AnalyzeResponseDto> {
+    return this.deIdService.analyzeText(dto, user.uuid);
   }
 
   @Post('preview')
   @ApiOperation({ summary: 'Step 4: Interactive Anonymization Preview' })
   @ApiOkResponse({ type: PreviewResponseDto })
-  async preview(@Body() dto: PreviewRequestDto): Promise<PreviewResponseDto> {
-    const text = await this.deIdService.getPreview(dto);
+  async preview(
+    @Body() dto: PreviewRequestDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<PreviewResponseDto> {
+    const text = await this.deIdService.getPreview(dto, user.uuid);
     return { anonymizedText: text };
   }
 
@@ -44,7 +55,10 @@ export default class DeIdController {
   @Get('stats')
   @ApiOperation({ summary: 'De-identification dashboard statistics' })
   @ApiOkResponse({ type: DeIdStatsResponseDto })
-  async getStats(): Promise<DeIdStatsResponseDto> {
-    return this.statsService.getDashboardData();
+  async getStats(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: DeIdStatsQueryDto,
+  ): Promise<DeIdStatsResponseDto> {
+    return this.statsService.getDashboardData(user.uuid, query);
   }
 }

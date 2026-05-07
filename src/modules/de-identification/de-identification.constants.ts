@@ -1,0 +1,37 @@
+export enum DeIdStatsPeriod {
+  TODAY = 'today',
+  LAST_7_DAYS = 'last_7_days',
+  LAST_14_DAYS = 'last_14_days',
+  MONTH = 'month',
+}
+
+export const DE_ID_STATS_FILTERS = {
+  DEFAULT_TIMEZONE: 'UTC',
+  SOURCE_UTC_OFFSET: '+00:00',
+  START_OF_DAY_TIME: '00:00:00',
+  TODAY_RANGE_DAYS: 1,
+  LAST_7_DAYS_RANGE_DAYS: 7,
+  LAST_14_DAYS_RANGE_DAYS: 14,
+  MONTH_RANGE_DAYS: 30,
+  DATE_STRING_SEPARATOR: '-',
+  PERCENT_MULTIPLIER: 100,
+  ZERO: 0,
+  DEFAULT_SUCCESS_RATE: 100,
+  PERCENT_PRECISION: 2,
+};
+
+export const DE_ID_STATS_ERRORS = {
+  INVALID_TIMEZONE: 'Invalid timezone value',
+};
+
+export const DE_ID_STATS_CONFIDENCE_BUCKETS = {
+  NINETY_TO_HUNDRED: '90-100%',
+  EIGHTY_TO_NINETY: '80-90%',
+  SEVENTY_TO_EIGHTY: '70-80%',
+  SIXTY_TO_SEVENTY: '60-70%',
+  UNDER_SIXTY: '<60%',
+};
+
+export const DE_ID_STATS_METHOD_LABELS = {
+  UNKNOWN: 'Unknown',
+};

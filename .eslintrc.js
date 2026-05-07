@@ -25,6 +25,7 @@ module.exports = {
     'max-classes-per-file': 'off',
     'prettier/prettier': ['error', { endOfLine: 'auto' }],
     'import/prefer-default-export': 'off',
+    'import/no-extraneous-dependencies': ['error', { packageDir: [__dirname] }],
   },
   settings: {
     'import/resolver': {
