@@ -21,8 +21,6 @@ export default class Subscription {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  // FK to template_users.uuid (not enforced as a TypeORM relation here to keep
-  // the entity self-contained — constraint is added in the migration).
   @Index()
   @Column({ type: 'varchar', length: 36 })
   userId!: string;

@@ -80,7 +80,6 @@ export default class UserController {
   @SerializeOptions({ type: ReturnUserDto })
   @Get(':uuid')
   async getByUuid(@Param('uuid', new ParseUUIDPipe()) uuid: string): Promise<ReturnUserDto> {
-    // return this.userService.findOne(uuid);
     return (await this.userService.findOne(uuid)) as ReturnUserDto;
   }
 

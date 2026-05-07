@@ -4,9 +4,7 @@ export class BillingTables1777593600000 implements MigrationInterface {
   name = 'BillingTables1777593600000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(
-      'ALTER TABLE `template_users` ADD `stripeCustomerId` varchar(64) NULL',
-    );
+    await queryRunner.query('ALTER TABLE `template_users` ADD `stripeCustomerId` varchar(64) NULL');
 
     await queryRunner.query(
       `CREATE TABLE IF NOT EXISTS \`subscriptions\` (
