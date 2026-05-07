@@ -4,8 +4,8 @@ import { ConfigService } from '@nestjs/config';
 import User from './entities/user.entity';
 import DeIdJob from './entities/de-id-job.entity';
 import DetectedEntity from './entities/detected-entity.entity';
-import { NODE_ENV } from '../constants';
 import Subscription from './entities/subscription.entity';
+import { NODE_ENV } from '../constants';
 
 config();
 const configService = new ConfigService();
@@ -22,27 +22,22 @@ if (shouldUseTsMigrations) {
 
 export const dataSourceOptions: DataSourceOptions = {
   type: 'mysql',
-  host: configService.getOrThrow<string>('DB_HOST'),
-  port: configService.getOrThrow<number>('DB_PORT'),
-  username: configService.getOrThrow<string>('DB_USERNAME'),
-  password: configService.getOrThrow<string>('DB_PASSWORD'),
-  database: configService.getOrThrow<string>('DB_NAME'),
-  entities: [TemplateUser, DeIdJob, DetectedEntity, Subscription],
-  migrations,
-  migrationsRun: shouldAutoRunMigrations,
   synchronize: false,
   logging: false,
-  entities: [User, DeIdJob, DetectedEntity],
+  migrations,
+  migrationsRun: shouldAutoRunMigrations,
   ...(databaseUrl
-    ? { url: databaseUrl }
+    ? {
+        url: databaseUrl,
+      }
     : {
         host: configService.getOrThrow<string>('DB_HOST'),
         port: configService.getOrThrow<number>('DB_PORT'),
         username: configService.getOrThrow<string>('DB_USERNAME'),
         password: configService.getOrThrow<string>('DB_PASSWORD'),
         database: configService.getOrThrow<string>('DB_NAME'),
-        entities: [User, DeIdJob, DetectedEntity],
       }),
+  entities: [User, DeIdJob, DetectedEntity, Subscription],
 };
 
 const dataSource = new DataSource(dataSourceOptions);

@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
     "paths": {
-      "@common/*": ["./src/common/*"]
+      "@common/*": ["./src/common/*"],
+      "@db/*": [
+        "./src/common/db/*"
+      ]
+
     },
     "module": "node16",
     "moduleResolution": "node16",
@@ -26,5 +30,5 @@
     "noFallthroughCasesInSwitch": false,
    
   },
-   "exclude": ["src/modules/example-user", "src/modules/auth/auth.service.ts"]
+   "exclude": ["src/modules/auth/auth.service.ts"]
 }
