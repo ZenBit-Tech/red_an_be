@@ -51,7 +51,7 @@ export default class UserController {
   @SerializeOptions({ type: ReturnUserDto })
   @Post()
   async create(@Body() body: CreateUserDto): Promise<ReturnUserDto> {
-    return this.userService.create(body);
+    return (await this.userService.create(body)) as ReturnUserDto;
   }
 
   @ApiOperation({ summary: 'Get all template users' })
@@ -64,7 +64,7 @@ export default class UserController {
   @SerializeOptions({ type: ReturnUserDto })
   @Get()
   async getAll(): Promise<ReturnUserDto[]> {
-    return this.userService.findAll();
+    return (await this.userService.findAll()) as ReturnUserDto[];
   }
 
   @ApiOperation({ summary: 'Get user by uuid' })
@@ -80,7 +80,8 @@ export default class UserController {
   @SerializeOptions({ type: ReturnUserDto })
   @Get(':uuid')
   async getByUuid(@Param('uuid', new ParseUUIDPipe()) uuid: string): Promise<ReturnUserDto> {
-    return this.userService.findOne(uuid);
+    // return this.userService.findOne(uuid);
+    return (await this.userService.findOne(uuid)) as ReturnUserDto;
   }
 
   @ApiOperation({ summary: 'Check database connection using QueryBuilder select' })
@@ -88,6 +89,6 @@ export default class UserController {
   @ApiInternalServerErrorResponse({ description: 'Database connection check failed' })
   @Get('health/db')
   async checkDbConnection(): Promise<DbHealthResponse> {
-    return this.userService.checkDbConnection();
+    return (await this.userService.checkDbConnection()) as DbHealthResponse;
   }
 }

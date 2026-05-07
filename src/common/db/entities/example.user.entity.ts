@@ -8,8 +8,8 @@ import {
 @Index('IDX_TEMPLATE_USERS_EMAIL', ['email'])
 export default class TemplateUser {
   @PrimaryGeneratedColumn('uuid')
-  uuid: string;
+  uuid: string | undefined;
 
   @Column({ length: EXAMPLE_USER_LIMITS.EMAIL_MAX_LENGTH, unique: true, nullable: false })
-  email: string;
+  email: string | undefined;
 }

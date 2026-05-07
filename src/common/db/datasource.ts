@@ -5,6 +5,7 @@ import TemplateUser from './entities/user.entity';
 import DeIdJob from './entities/de-id-job.entity';
 import DetectedEntity from './entities/detected-entity.entity';
 import { NODE_ENV } from '../constants';
+import Subscription from './entities/subscription.entity';
 
 config();
 const configService = new ConfigService();
@@ -25,7 +26,7 @@ export const dataSourceOptions: DataSourceOptions = {
   username: configService.getOrThrow<string>('DB_USERNAME'),
   password: configService.getOrThrow<string>('DB_PASSWORD'),
   database: configService.getOrThrow<string>('DB_NAME'),
-  entities: [TemplateUser, DeIdJob, DetectedEntity],
+  entities: [TemplateUser, DeIdJob, DetectedEntity, Subscription],
   migrations,
   migrationsRun: shouldAutoRunMigrations,
   synchronize: false,

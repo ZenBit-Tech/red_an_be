@@ -44,7 +44,7 @@ export default class AuthService {
       .where('uuid = :uuid', { uuid: user!.uuid })
       .execute();
 
-    await this.mailService.sendMagicLink(user!.email, magicToken);
+    await this.mailService.sendMagicLink(user!.email as string, magicToken);
   }
 
   async verifyMagicLink(token: string): Promise<{ accessToken: string }> {

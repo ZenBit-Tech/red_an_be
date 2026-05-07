@@ -4,11 +4,14 @@ import { Entity, Column, PrimaryGeneratedColumn, Index } from 'typeorm';
 @Index('IDX_TEMPLATE_USERS_EMAIL', ['email'])
 export default class TemplateUser {
   @PrimaryGeneratedColumn('uuid')
-  uuid: string;
+  uuid: string | undefined;
 
-  @Column({ unique: true, nullable: false })
-  email: string;
+  @Column({ type: 'varchar', unique: true, nullable: false })
+  email: string | undefined;
 
   @Column({ type: 'varchar', nullable: true })
   magicLinkToken?: string | null;
+
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  stripeCustomerId?: string | null;
 }

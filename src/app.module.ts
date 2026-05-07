@@ -8,6 +8,7 @@ import { dataSourceOptions } from './common/db/datasource';
 import MailModule from './modules/mail/mail.module';
 import DeIdModule from './modules/de-identification/de-identification.module';
 import AuthModule from './modules/auth/auth.module';
+import BillingModule from './modules/billing/billing.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import AuthModule from './modules/auth/auth.module';
     MailModule,
     DeIdModule,
     AuthModule,
+    BillingModule,
   ],
   controllers: [AppController],
   providers: [AppService],

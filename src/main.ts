@@ -35,7 +35,7 @@ function resolveCorsOrigins(configService: ConfigService): string[] {
 async function bootstrap() {
   await ensureDatabase();
 
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { rawBody: true });
   const configService = new ConfigService();
   const corsOrigins = resolveCorsOrigins(configService);
 
@@ -66,6 +66,7 @@ async function bootstrap() {
   await app.listen(configService.getOrThrow<number>('PORT') ?? DEFAULT_PORT);
 }
 
-bootstrap().catch(() => {
+bootstrap().catch((e) => {
+  console.error('BOOTSTRAP ERROR:', e);
   process.exit(1);
 });
