@@ -38,7 +38,7 @@ async function bootstrap() {
   }
 
   const app = await NestFactory.create(AppModule, { rawBody: true });
-  const configService = new ConfigService();
+  const configService = app.get(ConfigService);
   const corsOrigins = resolveCorsOrigins(configService);
 
   app.enableCors({
