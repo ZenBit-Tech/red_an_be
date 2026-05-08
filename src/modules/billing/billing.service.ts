@@ -9,12 +9,15 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import Stripe from 'stripe';
 
-import TemplateUser from '@db/entities/user.entity';
-import Subscription, { SubscriptionStatus } from '@db/entities/subscription.entity';
+import Subscription, { SubscriptionStatus } from '@common/db/entities/subscription.entity';
+import StripeWebhookEvent from '@common/db/entities/stripe-webhook-event.entity';
+import User from '@common/db/entities/user.entity';
+import isMySqlError from '@common/utils/isMySqlError';
 
 import { BILLING_ENV, BILLING_ERRORS, BILLING_PATHS } from '@common/constants/billing.constants';
 
 type CreateCheckoutSessionResult = { url: string };
+const MYSQL_DUPLICATE_ENTRY_CODE = 'ER_DUP_ENTRY';
 
 @Injectable()
 export default class BillingService {
@@ -28,10 +31,12 @@ export default class BillingService {
 
   constructor(
     private readonly configService: ConfigService,
-    @InjectRepository(TemplateUser)
-    private readonly userRepository: Repository<TemplateUser>,
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
     @InjectRepository(Subscription)
     private readonly subscriptionRepository: Repository<Subscription>,
+    @InjectRepository(StripeWebhookEvent)
+    private readonly stripeWebhookEventRepository: Repository<StripeWebhookEvent>,
   ) {
     const secretKey = this.configService.getOrThrow<string>(BILLING_ENV.STRIPE_SECRET_KEY);
     this.webhookSecret = this.configService.getOrThrow<string>(BILLING_ENV.STRIPE_WEBHOOK_SECRET);
@@ -106,7 +111,19 @@ export default class BillingService {
     return this.stripe.webhooks.constructEvent(rawBody, signature, this.webhookSecret);
   }
 
-  private async ensureStripeCustomer(user: TemplateUser): Promise<string> {
+  public async claimWebhookEvent(eventId: string): Promise<boolean> {
+    try {
+      await this.stripeWebhookEventRepository.insert({ stripeEventId: eventId });
+      return true;
+    } catch (error: unknown) {
+      if (isMySqlError(error) && error.code === MYSQL_DUPLICATE_ENTRY_CODE) {
+        return false;
+      }
+      throw error;
+    }
+  }
+
+  private async ensureStripeCustomer(user: User): Promise<string> {
     if (user.stripeCustomerId) {
       return user.stripeCustomerId;
     }

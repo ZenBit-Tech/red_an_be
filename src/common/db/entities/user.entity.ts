@@ -4,10 +4,10 @@ import { Entity, Column, PrimaryGeneratedColumn, Index } from 'typeorm';
 @Index('IDX_USERS_EMAIL', ['email'])
 export default class User {
   @PrimaryGeneratedColumn('uuid')
-  uuid: string | undefined;
+  uuid!: string;
 
   @Column({ type: 'varchar', unique: true, nullable: false })
-  email: string | undefined;
+  email!: string;
 
   @Column({ type: 'varchar', nullable: true })
   magicLinkToken?: string | null;

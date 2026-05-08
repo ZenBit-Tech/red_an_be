@@ -23,8 +23,6 @@ import BillingService from './modules/billing/billing.service';
 export default class WebhookController {
   private readonly logger = new Logger(WebhookController.name);
 
-  private readonly processedEvents = new Set<string>();
-
   constructor(private readonly billingService: BillingService) {}
 
   @Post(WEBHOOKS_STRIPE_PATH)
@@ -46,7 +44,8 @@ export default class WebhookController {
       throw new BadRequestException(`${BILLING_ERRORS.WEBHOOK_SIGNATURE_INVALID}: ${message}`);
     }
 
-    if (this.processedEvents.has(event.id)) {
+    const isNewEvent = await this.billingService.claimWebhookEvent(event.id);
+    if (!isNewEvent) {
       this.logger.log(`Skipping duplicate event ${event.id}`);
       return { received: true, duplicate: true };
     }
@@ -76,7 +75,6 @@ export default class WebhookController {
         this.logger.log(`Unhandled Stripe event: ${event.type}`);
     }
 
-    this.processedEvents.add(event.id);
     return { received: true };
   }
 }

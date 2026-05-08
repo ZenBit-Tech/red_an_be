@@ -1,7 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
-import { ValidationPipe } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import AppModule from './app.module';
 import {
   APP_DESCRIPTION,
@@ -71,6 +71,7 @@ async function bootstrap() {
 }
 
 bootstrap().catch((e) => {
-  console.error('BOOTSTRAP ERROR:', e);
+  const logger = new Logger('Bootstrap');
+  logger.error('Bootstrap failed', e instanceof Error ? e.stack : String(e));
   process.exit(1);
 });

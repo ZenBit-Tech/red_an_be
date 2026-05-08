@@ -1,10 +1,26 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
+const USERS_TABLE = 'users';
+const LEGACY_USERS_TABLE = 'template_users';
+
 export class BillingTables1777593600000 implements MigrationInterface {
   name = 'BillingTables1777593600000';
 
+  private async resolveUsersTable(queryRunner: QueryRunner): Promise<string> {
+    const hasUsersTable = await queryRunner.hasTable(USERS_TABLE);
+    if (hasUsersTable) {
+      return USERS_TABLE;
+    }
+
+    return LEGACY_USERS_TABLE;
+  }
+
   public async up(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query('ALTER TABLE `template_users` ADD `stripeCustomerId` varchar(64) NULL');
+    const usersTable = await this.resolveUsersTable(queryRunner);
+
+    await queryRunner.query(
+      `ALTER TABLE \`${usersTable}\` ADD \`stripeCustomerId\` varchar(64) NULL`,
+    );
 
     await queryRunner.query(
       `CREATE TABLE IF NOT EXISTS \`subscriptions\` (
@@ -28,19 +44,21 @@ export class BillingTables1777593600000 implements MigrationInterface {
       `ALTER TABLE \`subscriptions\`
         ADD CONSTRAINT \`FK_subscriptions_userId\`
         FOREIGN KEY (\`userId\`)
-        REFERENCES \`template_users\`(\`uuid\`)
+        REFERENCES \`${usersTable}\`(\`uuid\`)
         ON DELETE CASCADE
         ON UPDATE NO ACTION`,
     );
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
+    const usersTable = await this.resolveUsersTable(queryRunner);
+
     await queryRunner
       .query('ALTER TABLE `subscriptions` DROP FOREIGN KEY `FK_subscriptions_userId`')
       .catch(() => undefined);
     await queryRunner.query('DROP TABLE IF EXISTS `subscriptions`');
     await queryRunner
-      .query('ALTER TABLE `template_users` DROP COLUMN `stripeCustomerId`')
+      .query(`ALTER TABLE \`${usersTable}\` DROP COLUMN \`stripeCustomerId\``)
       .catch(() => undefined);
   }
 }

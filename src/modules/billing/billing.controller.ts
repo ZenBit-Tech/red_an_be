@@ -11,7 +11,7 @@ import {
 import { BILLING_ROUTE, BILLING_TAG } from '@common/constants/billing.constants';
 import JwtAuthGuard from '@auth/guards/jwt-auth.guard';
 import { CurrentUser } from '@auth/decorators/current-user.decorator';
-import type { JwtPayload } from '@auth/guards/jwt-auth.guard';
+import type { AuthenticatedUser } from '@auth/types/authenticated-user.type';
 import BillingService from '@billing/billing.service';
 import CreateCheckoutSessionDto from '@billing/dto/create-checkout-session.dto';
 
@@ -36,14 +36,17 @@ export default class BillingController {
   @ApiInternalServerErrorResponse({ description: 'Failed to create Stripe checkout session' })
   async createCheckoutSession(
     @Body() dto: CreateCheckoutSessionDto,
-    @CurrentUser() user: JwtPayload,
+    @CurrentUser() user: AuthenticatedUser,
   ): Promise<CheckoutSessionResponseDto> {
-    return this.billingService.createCheckoutSession(user.sub, dto.priceId);
+    return this.billingService.createCheckoutSession(user.uuid, dto.priceId);
   }
 
   @Get('checkout-session/:sessionId')
   @ApiOperation({ summary: 'Get Stripe Checkout Session status' })
-  async getCheckoutSession(@Param('sessionId') sessionId: string, @CurrentUser() user: JwtPayload) {
-    return this.billingService.getCheckoutSessionStatus(user.sub, sessionId);
+  async getCheckoutSession(
+    @Param('sessionId') sessionId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.billingService.getCheckoutSessionStatus(user.uuid, sessionId);
   }
 }

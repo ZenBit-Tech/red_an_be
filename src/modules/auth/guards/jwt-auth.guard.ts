@@ -1,13 +1,10 @@
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Request } from 'express';
+import type { AuthenticatedUser } from '../types/authenticated-user.type';
+import type { JwtPayload } from '../types/jwt-payload.type';
 
-export type JwtPayload = {
-  sub: string;
-  email: string;
-};
-
-export type AuthenticatedRequest = Request & { user: JwtPayload };
+export type AuthenticatedRequest = Request & { user: AuthenticatedUser };
 
 @Injectable()
 export default class JwtAuthGuard implements CanActivate {
@@ -23,7 +20,10 @@ export default class JwtAuthGuard implements CanActivate {
 
     try {
       const payload = this.jwtService.verify<JwtPayload>(token);
-      (request as AuthenticatedRequest).user = payload;
+      (request as AuthenticatedRequest).user = {
+        uuid: payload.sub,
+        email: payload.email,
+      };
       return true;
     } catch {
       throw new UnauthorizedException('Invalid or expired access token');

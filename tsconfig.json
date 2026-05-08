@@ -2,15 +2,11 @@
   "compilerOptions": {
     "paths": {
       "@common/*": ["./src/common/*"],
-      "@db/*": [
-        "./src/common/db/*"
-      ],
       "@auth/*": ["./src/modules/auth/*"],
-  "@billing/*": ["./src/modules/billing/*"]
-
+      "@billing/*": ["./src/modules/billing/*"]
     },
-    "module": "node16",
-    "moduleResolution": "node16",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
     "resolvePackageJsonExports": true,
     "esModuleInterop": true,
     "isolatedModules": true,
@@ -29,8 +25,6 @@
     "forceConsistentCasingInFileNames": true,
     "noImplicitAny": false,
     "strictBindCallApply": false,
-    "noFallthroughCasesInSwitch": false,
-   
-  },
-   "exclude": ["src/modules/auth/auth.service.ts"]
+    "noFallthroughCasesInSwitch": false
+  }
 }
