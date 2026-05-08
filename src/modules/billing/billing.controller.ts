@@ -8,13 +8,12 @@ import {
   ApiInternalServerErrorResponse,
 } from '@nestjs/swagger';
 
-import JwtAuthGuard from '../auth/guards/jwt-auth.guard';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import type { JwtPayload } from '../auth/guards/jwt-auth.guard';
-
-import BillingService from './billing.service';
-import CreateCheckoutSessionDto from './dto/create-checkout-session.dto';
-import { BILLING_ROUTE, BILLING_TAG } from '../../common/constants/billing.constants';
+import { BILLING_ROUTE, BILLING_TAG } from '@common/constants/billing.constants';
+import JwtAuthGuard from '@auth/guards/jwt-auth.guard';
+import { CurrentUser } from '@auth/decorators/current-user.decorator';
+import type { JwtPayload } from '@auth/guards/jwt-auth.guard';
+import BillingService from '@billing/billing.service';
+import CreateCheckoutSessionDto from '@billing/dto/create-checkout-session.dto';
 
 class CheckoutSessionResponseDto {
   url!: string;

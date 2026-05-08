@@ -4,7 +4,9 @@
       "@common/*": ["./src/common/*"],
       "@db/*": [
         "./src/common/db/*"
-      ]
+      ],
+      "@auth/*": ["./src/modules/auth/*"],
+  "@billing/*": ["./src/modules/billing/*"]
 
     },
     "module": "node16",
