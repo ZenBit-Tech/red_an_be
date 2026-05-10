@@ -6,9 +6,12 @@ export default class User {
   @PrimaryGeneratedColumn('uuid')
   uuid!: string;
 
-  @Column({ unique: true, nullable: false })
+  @Column({ type: 'varchar', unique: true, nullable: false })
   email!: string;
 
   @Column({ type: 'varchar', nullable: true })
   magicLinkToken?: string | null;
+
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  stripeCustomerId?: string | null;
 }

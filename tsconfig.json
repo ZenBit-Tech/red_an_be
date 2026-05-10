@@ -1,7 +1,9 @@
 {
   "compilerOptions": {
     "paths": {
-      "@common/*": ["./src/common/*"]
+      "@common/*": ["./src/common/*"],
+      "@auth/*": ["./src/modules/auth/*"],
+      "@billing/*": ["./src/modules/billing/*"]
     },
     "module": "nodenext",
     "moduleResolution": "nodenext",

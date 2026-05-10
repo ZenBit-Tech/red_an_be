@@ -7,9 +7,10 @@ import DeIdService from './de-identification.service';
 import StatsService from './stats.service';
 import PresidioClient from './presidio.client';
 import RemoteNlpClient from './remote-nlp.client';
+import AuthModule from '../auth/auth.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([DeIdJob, DetectedEntity])],
+  imports: [TypeOrmModule.forFeature([DeIdJob, DetectedEntity]), AuthModule],
   controllers: [DeIdController],
   providers: [DeIdService, StatsService, PresidioClient, RemoteNlpClient],
   exports: [DeIdService],

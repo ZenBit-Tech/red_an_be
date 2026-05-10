@@ -1,7 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
-import { ValidationPipe } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import AppModule from './app.module';
 import {
   APP_DESCRIPTION,
@@ -37,7 +37,7 @@ async function bootstrap() {
     await ensureDatabase();
   }
 
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { rawBody: true });
   const configService = app.get(ConfigService);
   const corsOrigins = resolveCorsOrigins(configService);
 
@@ -70,6 +70,8 @@ async function bootstrap() {
   await app.listen(port, '0.0.0.0');
 }
 
-bootstrap().catch(() => {
+bootstrap().catch((e) => {
+  const logger = new Logger('Bootstrap');
+  logger.error('Bootstrap failed', e instanceof Error ? e.stack : String(e));
   process.exit(1);
 });
