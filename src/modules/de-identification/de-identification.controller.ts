@@ -1,5 +1,14 @@
-import { Body, Controller, Get, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  Body,
+  Controller,
+  Get,
+  Patch,
+  Post,
+  Query,
+  StreamableFile,
+  UseGuards,
+} from '@nestjs/common';
+import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiProduces, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import JwtAuthGuard from '../auth/guards/jwt-auth.guard';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
@@ -13,7 +22,6 @@ import {
 import {
   AnalyzeResponseDto,
   BulkUpdateEntityStatusesResponseDto,
-  GenerateSyntheticVariantsResponseDto,
   PreviewResponseDto,
   RemoteNlpHealthResponseDto,
 } from './dto/response.dto';
@@ -64,16 +72,24 @@ export default class DeIdController {
 
   @Post('synthetic')
   @ApiOperation({ summary: 'Generate N synthetic variants of de-identified text' })
-  @ApiOkResponse({ type: GenerateSyntheticVariantsResponseDto })
+  @ApiProduces('application/zip')
+  @ApiOkResponse({
+    description: 'ZIP archive with synthetic variants',
+    schema: {
+      type: 'string',
+      format: 'binary',
+    },
+  })
   async generateSyntheticVariants(
     @Body() dto: GenerateSyntheticVariantsRequestDto,
     @CurrentUser() user: AuthenticatedUser,
-  ): Promise<GenerateSyntheticVariantsResponseDto> {
+  ): Promise<StreamableFile> {
     const result = await this.deIdService.generateSyntheticVariants(dto, user.uuid);
-    const { archiveBuffer, ...response } = result;
-    // In full implementation, archiveBuffer would be streamed as file download
-    // For now, return metadata response
-    return response;
+
+    return new StreamableFile(result.archiveBuffer, {
+      type: result.mimeType,
+      disposition: `attachment; filename="${result.filename}"`,
+    });
   }
 
   @Get('remote-nlp/health')

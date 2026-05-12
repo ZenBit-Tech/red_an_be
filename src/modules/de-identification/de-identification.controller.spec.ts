@@ -1,3 +1,4 @@
+import { StreamableFile } from '@nestjs/common';
 import DeIdController from './de-identification.controller';
 import { DeIdStatsPeriod } from './de-identification.constants';
 import DeIdService from './de-identification.service';
@@ -240,18 +241,18 @@ describe('DeIdController', () => {
       outputFormat: SyntheticOutputFormat.TXT,
       mimeType: 'application/zip',
       filename: 'synthetic-variants-job-1.zip',
+      archiveBuffer: Buffer.from('zip-content'),
     });
 
     const result = await controller.generateSyntheticVariants(dto, TEST_USER);
 
     expect(deIdServiceMock.generateSyntheticVariants).toHaveBeenCalledTimes(1);
     expect(deIdServiceMock.generateSyntheticVariants).toHaveBeenCalledWith(dto, TEST_USER.uuid);
-    expect(result).toEqual({
-      jobId: 'job-1',
-      variantsGenerated: 5,
-      outputFormat: SyntheticOutputFormat.TXT,
-      mimeType: 'application/zip',
-      filename: 'synthetic-variants-job-1.zip',
+    expect(result).toBeInstanceOf(StreamableFile);
+    expect(result.getHeaders()).toMatchObject({
+      type: 'application/zip',
+      disposition: 'attachment; filename="synthetic-variants-job-1.zip"',
     });
+    expect(result.getHeaders().length).toBe(11);
   });
 });
