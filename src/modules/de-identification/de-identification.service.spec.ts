@@ -1269,9 +1269,15 @@ describe('DeIdService', () => {
   });
 
   it('should generate synthetic variants for active entities', async () => {
+    const sourceText = 'John Doe visited on 2025-02-14. Contact: +49 30 1234567';
+    const sourceTextHash = createHash('sha256').update(sourceText).digest('hex');
+
     entityManagerMock.findOne.mockResolvedValue({
       id: 'job-synthetic',
       userUuid: 'user-1',
+      framework: ComplianceFramework.GDPR_EU,
+      sourceTextHash,
+      sourceTextLength: sourceText.length,
     } satisfies Partial<DeIdJob>);
 
     entityManagerMock.find.mockResolvedValue([
@@ -1300,6 +1306,7 @@ describe('DeIdService', () => {
     const result = await service.generateSyntheticVariants(
       {
         jobId: 'job-synthetic',
+        text: sourceText,
         count: 3,
         outputFormat: SyntheticOutputFormat.TXT,
       },
@@ -1308,16 +1315,23 @@ describe('DeIdService', () => {
 
     expect(result.jobId).toBe('job-synthetic');
     expect(result.variantsGenerated).toBe(3);
-    expect(result.outputFormat).toBe('txt');
+    expect(result.outputFormat).toBe(SyntheticOutputFormat.TXT);
     expect(result.mimeType).toBe('application/zip');
     expect(result.filename).toContain('job-synthetic');
     expect(result.archiveBuffer).toBeDefined();
+    expect(result.archiveBuffer.subarray(0, 2).toString()).toBe('PK');
   });
 
   it('should reject synthetic generation for job with no active entities', async () => {
+    const sourceText = 'John Doe visited on 2025-02-14';
+    const sourceTextHash = createHash('sha256').update(sourceText).digest('hex');
+
     entityManagerMock.findOne.mockResolvedValue({
       id: 'job-no-active',
       userUuid: 'user-1',
+      framework: ComplianceFramework.GDPR_EU,
+      sourceTextHash,
+      sourceTextLength: sourceText.length,
     } satisfies Partial<DeIdJob>);
 
     entityManagerMock.find.mockResolvedValue([
@@ -1333,6 +1347,7 @@ describe('DeIdService', () => {
       service.generateSyntheticVariants(
         {
           jobId: 'job-no-active',
+          text: sourceText,
           count: 3,
           outputFormat: SyntheticOutputFormat.TXT,
         },
@@ -1348,12 +1363,35 @@ describe('DeIdService', () => {
       service.generateSyntheticVariants(
         {
           jobId: 'job-foreign',
+          text: 'irrelevant text',
           count: 3,
           outputFormat: SyntheticOutputFormat.TXT,
         },
         'user-1',
       ),
     ).rejects.toThrow(ForbiddenException);
+  });
+
+  it('should reject synthetic generation when text does not match analyzed input', async () => {
+    entityManagerMock.findOne.mockResolvedValue({
+      id: 'job-text-mismatch',
+      userUuid: 'user-1',
+      framework: ComplianceFramework.GDPR_EU,
+      sourceTextHash: createHash('sha256').update('another text').digest('hex'),
+      sourceTextLength: 'another text'.length,
+    } satisfies Partial<DeIdJob>);
+
+    await expect(
+      service.generateSyntheticVariants(
+        {
+          jobId: 'job-text-mismatch',
+          text: 'mismatched text',
+          count: 2,
+          outputFormat: SyntheticOutputFormat.TXT,
+        },
+        'user-1',
+      ),
+    ).rejects.toThrow(BadRequestException);
   });
 
   it('should reject preview when text is inconsistent with analyzed input', async () => {

@@ -7,7 +7,9 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import JSZip from 'jszip';
 import { createHash } from 'node:crypto';
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { EntityManager } from 'typeorm';
 
 import {
@@ -35,6 +37,7 @@ import {
   PreviewRequestDto,
   SyntheticOutputFormat,
 } from './dto/request.dto';
+import { DE_ID_SYNTHETIC_CONFIG, DE_ID_SYNTHETIC_DEFAULTS } from './de-identification.constants';
 import PresidioClient from './presidio.client';
 import RemoteNlpClient, { type RemoteNlpHealthStatus } from './remote-nlp.client';
 import {
@@ -243,6 +246,44 @@ const DEFAULT_PHI_VALIDATION_ALLOW_ZIP3 = true;
 const GDPR_PHI_SKIP_PATTERN_TYPES: ReadonlyArray<string> = ['SSN', 'ZIP', 'PHONE', 'IP'] as const;
 const DEFAULT_ANALYSIS_FAILURE_CODE = 'ANALYSIS_FAILED';
 const MAX_ERROR_CODE_LENGTH = 120;
+const SYNTHETIC_VARIANTS_ENV_KEY = 'DE_ID_SYNTHETIC_MAX_VARIANTS';
+const SYNTHETIC_VARIANTS_MIN_COUNT = 1;
+const SYNTHETIC_DOC_BASE_FILENAME = 'variant';
+const ZIP_GENERATE_TYPE_NODEBUFFER = 'nodebuffer' as const;
+const ZIP_COMPRESSION_DEFLATE = 'DEFLATE' as const;
+const SYNTHETIC_PDF_LAYOUT = {
+  PAGE_WIDTH: 595,
+  PAGE_HEIGHT: 842,
+  MARGIN: 48,
+  FONT_SIZE: 11,
+  LINE_HEIGHT: 16,
+  MAX_LINE_LENGTH: 90,
+};
+const SYNTHETIC_ENTITY_CATEGORIES = {
+  PERSON: 'PERSON',
+  EMAIL_ADDRESS: 'EMAIL_ADDRESS',
+  PHONE_NUMBER: 'PHONE_NUMBER',
+  PL_PHONE_NUMBER: 'PL_PHONE_NUMBER',
+  DATE_TIME: 'DATE_TIME',
+  DATE_OF_BIRTH: 'DATE_OF_BIRTH',
+  AGE: 'AGE',
+  ADDRESS: 'ADDRESS',
+  LOCATION: 'LOCATION',
+  ORGANIZATION: 'ORGANIZATION',
+  NATIONAL_ID: 'NATIONAL_ID',
+  US_SSN_FULL: 'US_SSN_FULL',
+  MEDICAL_RECORD_NUMBER: 'MEDICAL_RECORD_NUMBER',
+};
+const SYNTHETIC_FIRST_NAMES = ['Alex', 'Jordan', 'Taylor', 'Morgan', 'Casey'] as const;
+const SYNTHETIC_LAST_NAMES = ['Reed', 'Parker', 'Hayes', 'Brooks', 'Bennett'] as const;
+const SYNTHETIC_STREETS = ['Oak Avenue', 'Cedar Lane', 'Maple Street', 'River Road'] as const;
+const SYNTHETIC_CITIES = ['Springfield', 'Riverton', 'Fairview', 'Lakeside'] as const;
+const SYNTHETIC_ORGANIZATIONS = [
+  'Northside Health Group',
+  'City Care Network',
+  'Riverside Medical Center',
+  'Summit Clinical Services',
+] as const;
 const US_STATE_CODES = new Set<string>([
   'AL',
   'AK',
@@ -386,6 +427,15 @@ type BulkUpdateEntityStatusesResult = {
   jobId: string;
   updatedCount: number;
   findings: Array<DetectedEntity & { effectiveStatus: DetectedEntityStatus }>;
+};
+
+type GenerateSyntheticVariantsResult = {
+  jobId: string;
+  variantsGenerated: number;
+  outputFormat: SyntheticOutputFormat;
+  mimeType: string;
+  filename: string;
+  archiveBuffer: Buffer;
 };
 
 @Injectable()
@@ -848,60 +898,321 @@ export default class DeIdService {
   public async generateSyntheticVariants(
     dto: GenerateSyntheticVariantsRequestDto,
     userUuid: string,
-  ): Promise<{
-    jobId: string;
-    variantsGenerated: number;
-    outputFormat: string;
-    mimeType: string;
-    filename: string;
-    archiveBuffer: Buffer;
-  }> {
-    const job = await this.entityManager.findOne(DeIdJob, {
-      where: { id: dto.jobId, userUuid },
-    });
+  ): Promise<GenerateSyntheticVariantsResult> {
+    try {
+      const job = await this.entityManager.findOne(DeIdJob, {
+        where: { id: dto.jobId, userUuid },
+      });
 
-    if (!job) {
-      throw new ForbiddenException(
-        'You do not have access to generate synthetic variants for this job',
+      if (!job) {
+        throw new ForbiddenException(
+          'You do not have access to generate synthetic variants for this job',
+        );
+      }
+
+      const textHash = DeIdService.calculateTextHash(dto.text);
+      const isTextHashMatched = job.sourceTextHash === textHash;
+      const isTextLengthMatched = job.sourceTextLength === dto.text.length;
+
+      if (!isTextHashMatched || !isTextLengthMatched) {
+        throw new BadRequestException('Synthetic text does not match analyzed input');
+      }
+
+      const entities = await this.entityManager.find(DetectedEntity, {
+        where: { jobId: dto.jobId },
+        order: { start: 'ASC' },
+      });
+
+      const activeEntities = entities.filter(
+        (entity) => DeIdService.getEffectiveStatus(entity) === DetectedEntityStatus.ACTIVE,
       );
+
+      if (activeEntities.length === 0) {
+        throw new BadRequestException('No active entities found to generate synthetic variants');
+      }
+
+      const configuredMaxVariants = this.getSyntheticMaxVariants();
+      const boundedCount = Math.min(dto.count, configuredMaxVariants);
+      const variantsCount = Math.max(boundedCount, SYNTHETIC_VARIANTS_MIN_COUNT);
+
+      const variants = Array.from({ length: variantsCount }, (_, index) =>
+        DeIdService.buildSyntheticTextVariant(dto.text, job.framework, activeEntities, index + 1),
+      );
+
+      const archiveBuffer = await DeIdService.buildSyntheticArchiveBuffer(
+        variants,
+        dto.outputFormat,
+      );
+      const filename = `synthetic-variants-${job.id}-${Date.now()}${DE_ID_SYNTHETIC_CONFIG.ARCHIVE_EXTENSION}`;
+
+      return {
+        jobId: job.id,
+        variantsGenerated: variantsCount,
+        outputFormat: dto.outputFormat,
+        mimeType: DE_ID_SYNTHETIC_CONFIG.ARCHIVE_MIME_TYPE,
+        filename,
+        archiveBuffer,
+      };
+    } catch (error: unknown) {
+      if (error instanceof ForbiddenException || error instanceof BadRequestException) {
+        throw error;
+      }
+
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Synthetic variants generation failed: ${message}`);
+      throw new InternalServerErrorException('Failed to generate synthetic variants');
+    }
+  }
+
+  private getSyntheticMaxVariants(): number {
+    const configuredValue = this.configService.get<string>(SYNTHETIC_VARIANTS_ENV_KEY);
+    const parsedValue = configuredValue ? Number.parseInt(configuredValue, 10) : Number.NaN;
+
+    if (Number.isFinite(parsedValue) && parsedValue >= SYNTHETIC_VARIANTS_MIN_COUNT) {
+      return parsedValue;
     }
 
-    const entities = await this.entityManager.find(DetectedEntity, {
-      where: { jobId: dto.jobId },
-      order: { start: 'ASC' },
-    });
+    return DE_ID_SYNTHETIC_DEFAULTS.MAX_VARIANTS;
+  }
 
-    const activeEntities = entities.filter(
-      (entity) => DeIdService.getEffectiveStatus(entity) === DetectedEntityStatus.ACTIVE,
+  private static buildSyntheticTextVariant(
+    text: string,
+    framework: ComplianceFramework,
+    entities: DetectedEntity[],
+    variantOrdinal: number,
+  ): string {
+    const normalizedEntities = DeIdService.normalizeGdprPhoneLikeSpans(
+      framework,
+      text,
+      entities,
+      (entity) => entity.category,
+      (entity, end) => ({ ...entity, end }),
     );
 
-    if (activeEntities.length === 0) {
-      throw new BadRequestException('No active entities found to generate synthetic variants');
+    const previewSpans = DeIdService.buildNonOverlappingPreviewSpans(text, normalizedEntities).sort(
+      (first, second) => second.start - first.start,
+    );
+
+    const syntheticText = previewSpans.reduce((resultText, span) => {
+      const originalValue = text.substring(span.start, span.end);
+
+      if (DeIdService.shouldKeepNonPhiGenderValue(text, span.category, span.start, span.end)) {
+        return resultText;
+      }
+
+      if (shouldKeepOriginalByContext(span.category, originalValue, text, span.start)) {
+        return resultText;
+      }
+
+      const replacement = DeIdService.buildSyntheticReplacement(
+        span.category,
+        originalValue,
+        variantOrdinal,
+        span.start,
+      );
+      const trailingWhitespace = originalValue.match(/\s+$/)?.[0] ?? '';
+      const replacementWithSpacing =
+        trailingWhitespace && !/\s$/.test(replacement)
+          ? `${replacement}${trailingWhitespace}`
+          : replacement;
+
+      return resultText.slice(0, span.start) + replacementWithSpacing + resultText.slice(span.end);
+    }, text);
+
+    return normalizeAnonymizedText(syntheticText);
+  }
+
+  private static buildSyntheticReplacement(
+    category: string,
+    originalValue: string,
+    variantOrdinal: number,
+    entityStart: number,
+  ): string {
+    const seed = DeIdService.getSyntheticSeedValue(
+      `${category}:${originalValue}:${variantOrdinal}:${entityStart}`,
+    );
+
+    if (category === SYNTHETIC_ENTITY_CATEGORIES.PERSON) {
+      const firstName = SYNTHETIC_FIRST_NAMES[seed % SYNTHETIC_FIRST_NAMES.length];
+      const lastName =
+        SYNTHETIC_LAST_NAMES[
+          Math.floor(seed / SYNTHETIC_FIRST_NAMES.length) % SYNTHETIC_LAST_NAMES.length
+        ];
+      return `${firstName} ${lastName}`;
     }
 
-    const count = Math.min(dto.count, 20); // Enforce max limit
-    const variantsCount = Math.max(count, 1);
+    if (category === SYNTHETIC_ENTITY_CATEGORIES.EMAIL_ADDRESS) {
+      const localPart = `synthetic${variantOrdinal}${seed % 1000}`;
+      return `${localPart}@example.test`;
+    }
 
-    // For now, generate placeholder variants
-    // In full implementation, this would call Presidio's synthetic replacement strategy
-    const variants = Array.from({ length: variantsCount }, (_, index) => {
-      const variantNumber = index + 1;
-      return `Synthetic Variant ${variantNumber} - Placeholder de-identified text`;
+    if (
+      category === SYNTHETIC_ENTITY_CATEGORIES.PHONE_NUMBER ||
+      category === SYNTHETIC_ENTITY_CATEGORIES.PL_PHONE_NUMBER
+    ) {
+      return DeIdService.buildSyntheticPhoneValue(seed);
+    }
+
+    if (
+      category === SYNTHETIC_ENTITY_CATEGORIES.DATE_TIME ||
+      category === SYNTHETIC_ENTITY_CATEGORIES.DATE_OF_BIRTH
+    ) {
+      return DeIdService.buildSyntheticDateValue(seed);
+    }
+
+    if (category === SYNTHETIC_ENTITY_CATEGORIES.AGE) {
+      const age = 24 + (seed % 47);
+      return String(age);
+    }
+
+    if (
+      category === SYNTHETIC_ENTITY_CATEGORIES.ADDRESS ||
+      category === SYNTHETIC_ENTITY_CATEGORIES.LOCATION
+    ) {
+      const streetNumber = 100 + (seed % 900);
+      const street = SYNTHETIC_STREETS[seed % SYNTHETIC_STREETS.length];
+      const city =
+        SYNTHETIC_CITIES[Math.floor(seed / SYNTHETIC_STREETS.length) % SYNTHETIC_CITIES.length];
+      return `${streetNumber} ${street}, ${city}`;
+    }
+
+    if (category === SYNTHETIC_ENTITY_CATEGORIES.ORGANIZATION) {
+      return SYNTHETIC_ORGANIZATIONS[seed % SYNTHETIC_ORGANIZATIONS.length];
+    }
+
+    if (
+      category === SYNTHETIC_ENTITY_CATEGORIES.NATIONAL_ID ||
+      category === SYNTHETIC_ENTITY_CATEGORIES.US_SSN_FULL ||
+      category === SYNTHETIC_ENTITY_CATEGORIES.MEDICAL_RECORD_NUMBER
+    ) {
+      const numericPart = String(seed % 1_000_000).padStart(6, '0');
+      return `SYN-${numericPart}`;
+    }
+
+    return `[SYNTH_${category}_${variantOrdinal}]`;
+  }
+
+  private static getSyntheticSeedValue(seedInput: string): number {
+    const hash = DeIdService.calculateTextHash(seedInput);
+    return Number.parseInt(hash.slice(0, 8), 16);
+  }
+
+  private static buildSyntheticPhoneValue(seed: number): string {
+    const areaCode = 200 + (seed % 700);
+    const prefix = 100 + (Math.floor(seed / 7) % 900);
+    const lineNumber = String(seed % 10_000).padStart(4, '0');
+    return `+1 ${areaCode} ${prefix}${lineNumber}`;
+  }
+
+  private static buildSyntheticDateValue(seed: number): string {
+    const year = 1980 + (seed % 35);
+    const month = 1 + (Math.floor(seed / 11) % 12);
+    const day = 1 + (Math.floor(seed / 17) % 28);
+
+    const monthText = String(month).padStart(2, '0');
+    const dayText = String(day).padStart(2, '0');
+    return `${year}-${monthText}-${dayText}`;
+  }
+
+  private static async buildSyntheticArchiveBuffer(
+    variants: string[],
+    outputFormat: SyntheticOutputFormat,
+  ): Promise<Buffer> {
+    const zip = new JSZip();
+    const outputExtension =
+      outputFormat === SyntheticOutputFormat.PDF
+        ? DE_ID_SYNTHETIC_CONFIG.OUTPUT_FILE_EXTENSION_PDF
+        : DE_ID_SYNTHETIC_CONFIG.OUTPUT_FILE_EXTENSION_TXT;
+
+    const syntheticFiles = await Promise.all(
+      variants.map(async (variantText, index) => {
+        const filename = `${SYNTHETIC_DOC_BASE_FILENAME}-${index + 1}${outputExtension}`;
+
+        if (outputFormat === SyntheticOutputFormat.PDF) {
+          const pdfBuffer = await DeIdService.renderSyntheticPdfBuffer(variantText);
+          return { filename, content: pdfBuffer, binary: true };
+        }
+
+        return { filename, content: variantText, binary: false };
+      }),
+    );
+
+    syntheticFiles.forEach((fileEntry) => {
+      if (fileEntry.binary) {
+        zip.file(fileEntry.filename, fileEntry.content, { binary: true });
+        return;
+      }
+
+      zip.file(fileEntry.filename, fileEntry.content);
     });
 
-    const archiveBuffer = Buffer.from(variants.join('\n\n'), 'utf-8');
+    return zip.generateAsync({
+      type: ZIP_GENERATE_TYPE_NODEBUFFER,
+      compression: ZIP_COMPRESSION_DEFLATE,
+    });
+  }
 
-    const formatLabel = dto.outputFormat === SyntheticOutputFormat.PDF ? 'pdf' : 'txt';
-    const filename = `synthetic-variants-${job.id}-${Date.now()}.zip`;
+  private static async renderSyntheticPdfBuffer(text: string): Promise<Buffer> {
+    const pdfDocument = await PDFDocument.create();
+    const font = await pdfDocument.embedFont(StandardFonts.Helvetica);
 
-    return {
-      jobId: job.id,
-      variantsGenerated: variantsCount,
-      outputFormat: formatLabel,
-      mimeType: 'application/zip',
-      filename,
-      archiveBuffer,
-    };
+    let page = pdfDocument.addPage([
+      SYNTHETIC_PDF_LAYOUT.PAGE_WIDTH,
+      SYNTHETIC_PDF_LAYOUT.PAGE_HEIGHT,
+    ]);
+    let cursorY = SYNTHETIC_PDF_LAYOUT.PAGE_HEIGHT - SYNTHETIC_PDF_LAYOUT.MARGIN;
+    const textLines = DeIdService.wrapTextForPdf(text, SYNTHETIC_PDF_LAYOUT.MAX_LINE_LENGTH);
+
+    textLines.forEach((line) => {
+      if (cursorY <= SYNTHETIC_PDF_LAYOUT.MARGIN) {
+        page = pdfDocument.addPage([
+          SYNTHETIC_PDF_LAYOUT.PAGE_WIDTH,
+          SYNTHETIC_PDF_LAYOUT.PAGE_HEIGHT,
+        ]);
+        cursorY = SYNTHETIC_PDF_LAYOUT.PAGE_HEIGHT - SYNTHETIC_PDF_LAYOUT.MARGIN;
+      }
+
+      page.drawText(line, {
+        x: SYNTHETIC_PDF_LAYOUT.MARGIN,
+        y: cursorY,
+        size: SYNTHETIC_PDF_LAYOUT.FONT_SIZE,
+        font,
+        color: rgb(0, 0, 0),
+      });
+      cursorY -= SYNTHETIC_PDF_LAYOUT.LINE_HEIGHT;
+    });
+
+    const pdfBytes = await pdfDocument.save();
+    return Buffer.from(pdfBytes);
+  }
+
+  private static wrapTextForPdf(text: string, maxLineLength: number): string[] {
+    const paragraphs = text.split('\n');
+
+    return paragraphs.reduce<string[]>((allLines, paragraph) => {
+      if (!paragraph.trim()) {
+        return [...allLines, ''];
+      }
+
+      const words = paragraph.split(/\s+/);
+      const paragraphLines = words.reduce<string[]>(
+        (lines, word) => {
+          const currentLine = lines[lines.length - 1] ?? '';
+          const candidateLine = currentLine ? `${currentLine} ${word}` : word;
+
+          if (candidateLine.length <= maxLineLength) {
+            const nextLines = [...lines];
+            nextLines[nextLines.length - 1] = candidateLine;
+            return nextLines;
+          }
+
+          return [...lines, word];
+        },
+        [''],
+      );
+
+      return [...allLines, ...paragraphLines.filter((line) => line.length > 0)];
+    }, []);
   }
 
   private getPhiValidationOptions(framework?: ComplianceFramework): ValidationOptions {

@@ -5,6 +5,7 @@ import {
   DetectedEntitySystemReason,
   DetectedEntityUserReason,
 } from '@common/constants/compliance.constants';
+import { SyntheticOutputFormat } from './request.dto';
 
 export class DetectedEntityResponseDto {
   @ApiProperty({ example: '550e8400-e29b-41d4-a716-446655440000' })
@@ -84,8 +85,8 @@ export class GenerateSyntheticVariantsResponseDto {
   @ApiProperty({ example: 5 })
   readonly variantsGenerated!: number;
 
-  @ApiProperty({ example: 'txt' })
-  readonly outputFormat!: string;
+  @ApiProperty({ enum: SyntheticOutputFormat, example: SyntheticOutputFormat.TXT })
+  readonly outputFormat!: SyntheticOutputFormat;
 
   @ApiProperty({
     example: 'application/zip',

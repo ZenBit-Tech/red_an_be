@@ -104,6 +104,15 @@ export class GenerateSyntheticVariantsRequestDto {
   readonly jobId!: string;
 
   @ApiProperty({
+    example: 'Patient John Doe visited on 2026-01-10. Contact: +49 30 1234567',
+    description:
+      'Original analyzed text. Used to generate synthetic variants after hash/length validation.',
+  })
+  @IsString()
+  @IsNotEmpty()
+  readonly text!: string;
+
+  @ApiProperty({
     example: 5,
     description: 'Number of synthetic variants to generate. Max limit from environment config.',
   })

@@ -229,6 +229,7 @@ describe('DeIdController', () => {
   it('should call service generateSyntheticVariants', async () => {
     const dto: GenerateSyntheticVariantsRequestDto = {
       jobId: 'job-1',
+      text: 'Patient John Doe visited on 2026-01-10',
       count: 5,
       outputFormat: SyntheticOutputFormat.TXT,
     };
@@ -236,7 +237,7 @@ describe('DeIdController', () => {
     deIdServiceMock.generateSyntheticVariants.mockResolvedValue({
       jobId: 'job-1',
       variantsGenerated: 5,
-      outputFormat: 'txt',
+      outputFormat: SyntheticOutputFormat.TXT,
       mimeType: 'application/zip',
       filename: 'synthetic-variants-job-1.zip',
     });
@@ -248,7 +249,7 @@ describe('DeIdController', () => {
     expect(result).toEqual({
       jobId: 'job-1',
       variantsGenerated: 5,
-      outputFormat: 'txt',
+      outputFormat: SyntheticOutputFormat.TXT,
       mimeType: 'application/zip',
       filename: 'synthetic-variants-job-1.zip',
     });
