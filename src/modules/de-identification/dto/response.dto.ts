@@ -31,7 +31,10 @@ export class DetectedEntityResponseDto {
   @ApiProperty({ enum: DetectedEntityStatus, example: DetectedEntityStatus.ACTIVE })
   readonly systemStatus!: DetectedEntityStatus;
 
-  @ApiProperty({ enum: DetectedEntitySystemReason, example: DetectedEntitySystemReason.ANALYZER_DETECTED })
+  @ApiProperty({
+    enum: DetectedEntitySystemReason,
+    example: DetectedEntitySystemReason.ANALYZER_DETECTED,
+  })
   readonly systemStatusReason!: DetectedEntitySystemReason;
 
   @ApiProperty({ enum: DetectedEntityStatus, nullable: true, example: null })
