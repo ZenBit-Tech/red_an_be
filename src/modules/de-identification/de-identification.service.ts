@@ -31,7 +31,9 @@ import { PhiLeakDetectedError, ValidationOptions, validatePhi } from './context/
 import {
   AnalyzeRequestDto,
   BulkUpdateEntityStatusesRequestDto,
+  GenerateSyntheticVariantsRequestDto,
   PreviewRequestDto,
+  SyntheticOutputFormat,
 } from './dto/request.dto';
 import PresidioClient from './presidio.client';
 import RemoteNlpClient, { type RemoteNlpHealthStatus } from './remote-nlp.client';
@@ -840,6 +842,65 @@ export default class DeIdService {
       jobId: dto.jobId,
       updatedCount: savedEntities.length,
       findings: savedEntities.map((entity) => DeIdService.withEffectiveStatus(entity)),
+    };
+  }
+
+  public async generateSyntheticVariants(
+    dto: GenerateSyntheticVariantsRequestDto,
+    userUuid: string,
+  ): Promise<{
+    jobId: string;
+    variantsGenerated: number;
+    outputFormat: string;
+    mimeType: string;
+    filename: string;
+    archiveBuffer: Buffer;
+  }> {
+    const job = await this.entityManager.findOne(DeIdJob, {
+      where: { id: dto.jobId, userUuid },
+    });
+
+    if (!job) {
+      throw new ForbiddenException(
+        'You do not have access to generate synthetic variants for this job',
+      );
+    }
+
+    const entities = await this.entityManager.find(DetectedEntity, {
+      where: { jobId: dto.jobId },
+      order: { start: 'ASC' },
+    });
+
+    const activeEntities = entities.filter(
+      (entity) => DeIdService.getEffectiveStatus(entity) === DetectedEntityStatus.ACTIVE,
+    );
+
+    if (activeEntities.length === 0) {
+      throw new BadRequestException('No active entities found to generate synthetic variants');
+    }
+
+    const count = Math.min(dto.count, 20); // Enforce max limit
+    const variantsCount = Math.max(count, 1);
+
+    // For now, generate placeholder variants
+    // In full implementation, this would call Presidio's synthetic replacement strategy
+    const variants = Array.from({ length: variantsCount }, (_, index) => {
+      const variantNumber = index + 1;
+      return `Synthetic Variant ${variantNumber} - Placeholder de-identified text`;
+    });
+
+    const archiveBuffer = Buffer.from(variants.join('\n\n'), 'utf-8');
+
+    const formatLabel = dto.outputFormat === SyntheticOutputFormat.PDF ? 'pdf' : 'txt';
+    const filename = `synthetic-variants-${job.id}-${Date.now()}.zip`;
+
+    return {
+      jobId: job.id,
+      variantsGenerated: variantsCount,
+      outputFormat: formatLabel,
+      mimeType: 'application/zip',
+      filename,
+      archiveBuffer,
     };
   }
 

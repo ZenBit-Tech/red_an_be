@@ -77,6 +77,29 @@ export class BulkUpdateEntityStatusesResponseDto {
   readonly findings!: DetectedEntityResponseDto[];
 }
 
+export class GenerateSyntheticVariantsResponseDto {
+  @ApiProperty({ example: '550e8400-e29b-41d4-a716-446655440000' })
+  readonly jobId!: string;
+
+  @ApiProperty({ example: 5 })
+  readonly variantsGenerated!: number;
+
+  @ApiProperty({ example: 'txt' })
+  readonly outputFormat!: string;
+
+  @ApiProperty({
+    example: 'application/zip',
+    description: 'MIME type of the archive file',
+  })
+  readonly mimeType!: string;
+
+  @ApiProperty({
+    example: 'synthetic-variants-job-123.zip',
+    description: 'Suggested filename for the archive',
+  })
+  readonly filename!: string;
+}
+
 export class RemoteNlpHealthResponseDto {
   @ApiProperty({ example: true })
   readonly configured!: boolean;

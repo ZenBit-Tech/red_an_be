@@ -4,14 +4,20 @@ import DeIdService from './de-identification.service';
 import {
   AnalyzeRequestDto,
   BulkUpdateEntityStatusesRequestDto,
+  GenerateSyntheticVariantsRequestDto,
   PreviewRequestDto,
+  SyntheticOutputFormat,
 } from './dto/request.dto';
 import { DeIdStatsQueryDto } from './dto/stats-query.dto';
 import StatsService from './stats.service';
 
 type DeIdServiceContract = Pick<
   DeIdService,
-  'analyzeText' | 'bulkUpdateEntityStatuses' | 'getPreview' | 'getRemoteNlpHealth'
+  | 'analyzeText'
+  | 'bulkUpdateEntityStatuses'
+  | 'generateSyntheticVariants'
+  | 'getPreview'
+  | 'getRemoteNlpHealth'
 >;
 type StatsServiceContract = Pick<StatsService, 'getDashboardData'>;
 const TEST_USER = {
@@ -24,6 +30,7 @@ describe('DeIdController', () => {
   let deIdServiceMock: {
     analyzeText: jest.Mock;
     bulkUpdateEntityStatuses: jest.Mock;
+    generateSyntheticVariants: jest.Mock;
     getPreview: jest.Mock;
     getRemoteNlpHealth: jest.Mock;
   };
@@ -35,6 +42,7 @@ describe('DeIdController', () => {
     deIdServiceMock = {
       analyzeText: jest.fn(),
       bulkUpdateEntityStatuses: jest.fn(),
+      generateSyntheticVariants: jest.fn(),
       getPreview: jest.fn(),
       getRemoteNlpHealth: jest.fn(),
     };
@@ -215,6 +223,34 @@ describe('DeIdController', () => {
         confidenceScoreDistribution: [{ bucket: '90-100%', value: 7 }],
         deIdentificationMethodUsage: [{ method: 'Redact', value: 6 }],
       },
+    });
+  });
+
+  it('should call service generateSyntheticVariants', async () => {
+    const dto: GenerateSyntheticVariantsRequestDto = {
+      jobId: 'job-1',
+      count: 5,
+      outputFormat: SyntheticOutputFormat.TXT,
+    };
+
+    deIdServiceMock.generateSyntheticVariants.mockResolvedValue({
+      jobId: 'job-1',
+      variantsGenerated: 5,
+      outputFormat: 'txt',
+      mimeType: 'application/zip',
+      filename: 'synthetic-variants-job-1.zip',
+    });
+
+    const result = await controller.generateSyntheticVariants(dto, TEST_USER);
+
+    expect(deIdServiceMock.generateSyntheticVariants).toHaveBeenCalledTimes(1);
+    expect(deIdServiceMock.generateSyntheticVariants).toHaveBeenCalledWith(dto, TEST_USER.uuid);
+    expect(result).toEqual({
+      jobId: 'job-1',
+      variantsGenerated: 5,
+      outputFormat: 'txt',
+      mimeType: 'application/zip',
+      filename: 'synthetic-variants-job-1.zip',
     });
   });
 });

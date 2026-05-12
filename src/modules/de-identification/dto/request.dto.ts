@@ -14,6 +14,11 @@ import {
 } from 'class-validator';
 import { ComplianceFramework, DetectedEntityStatus } from '@common/constants/compliance.constants';
 
+export enum SyntheticOutputFormat {
+  TXT = 'txt',
+  PDF = 'pdf',
+}
+
 export class AnalyzeRequestDto {
   @ApiProperty({ example: 'Patient John Doe, born 1980-05-15...' })
   @IsString()
@@ -91,4 +96,27 @@ export class ResetEntityStatusRequestDto {
   @ApiProperty({ enum: DetectedEntityStatus, example: DetectedEntityStatus.ACTIVE })
   @IsEnum(DetectedEntityStatus)
   readonly fallbackStatus!: DetectedEntityStatus;
+}
+
+export class GenerateSyntheticVariantsRequestDto {
+  @ApiProperty({ example: '550e8400-e29b-41d4-a716-446655440000' })
+  @IsUUID('4')
+  readonly jobId!: string;
+
+  @ApiProperty({
+    example: 5,
+    description: 'Number of synthetic variants to generate. Max limit from environment config.',
+  })
+  @IsNumber()
+  @Min(1)
+  @Max(20)
+  readonly count!: number;
+
+  @ApiProperty({
+    enum: SyntheticOutputFormat,
+    example: SyntheticOutputFormat.TXT,
+    description: 'Output file format: txt or pdf',
+  })
+  @IsEnum(SyntheticOutputFormat)
+  readonly outputFormat!: SyntheticOutputFormat;
 }

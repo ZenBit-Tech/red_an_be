@@ -20,6 +20,7 @@ import DetectedEntity from '@common/db/entities/detected-entity.entity';
 import DeIdService from './de-identification.service';
 import PresidioClient from './presidio.client';
 import RemoteNlpClient from './remote-nlp.client';
+import { SyntheticOutputFormat } from './dto/request.dto';
 
 type AnalyzerFinding = {
   entity_type: string;
@@ -1261,6 +1262,94 @@ describe('DeIdService', () => {
         {
           jobId: 'job-foreign',
           activeEntityIds: [],
+        },
+        'user-1',
+      ),
+    ).rejects.toThrow(ForbiddenException);
+  });
+
+  it('should generate synthetic variants for active entities', async () => {
+    entityManagerMock.findOne.mockResolvedValue({
+      id: 'job-synthetic',
+      userUuid: 'user-1',
+    } satisfies Partial<DeIdJob>);
+
+    entityManagerMock.find.mockResolvedValue([
+      {
+        id: 'entity-1',
+        jobId: 'job-synthetic',
+        category: 'PERSON',
+        confidence: 95,
+        start: 0,
+        end: 4,
+        proxyType: 'Redact',
+        systemStatus: DetectedEntityStatus.ACTIVE,
+      },
+      {
+        id: 'entity-2',
+        jobId: 'job-synthetic',
+        category: 'DATE_TIME',
+        confidence: 90,
+        start: 10,
+        end: 14,
+        proxyType: 'Generalization',
+        systemStatus: DetectedEntityStatus.INACTIVE,
+      },
+    ] satisfies Partial<DetectedEntity>[]);
+
+    const result = await service.generateSyntheticVariants(
+      {
+        jobId: 'job-synthetic',
+        count: 3,
+        outputFormat: SyntheticOutputFormat.TXT,
+      },
+      'user-1',
+    );
+
+    expect(result.jobId).toBe('job-synthetic');
+    expect(result.variantsGenerated).toBe(3);
+    expect(result.outputFormat).toBe('txt');
+    expect(result.mimeType).toBe('application/zip');
+    expect(result.filename).toContain('job-synthetic');
+    expect(result.archiveBuffer).toBeDefined();
+  });
+
+  it('should reject synthetic generation for job with no active entities', async () => {
+    entityManagerMock.findOne.mockResolvedValue({
+      id: 'job-no-active',
+      userUuid: 'user-1',
+    } satisfies Partial<DeIdJob>);
+
+    entityManagerMock.find.mockResolvedValue([
+      {
+        id: 'entity-1',
+        jobId: 'job-no-active',
+        category: 'PERSON',
+        systemStatus: DetectedEntityStatus.INACTIVE,
+      },
+    ] satisfies Partial<DetectedEntity>[]);
+
+    await expect(
+      service.generateSyntheticVariants(
+        {
+          jobId: 'job-no-active',
+          count: 3,
+          outputFormat: SyntheticOutputFormat.TXT,
+        },
+        'user-1',
+      ),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('should reject synthetic generation for foreign job', async () => {
+    entityManagerMock.findOne.mockResolvedValue(null);
+
+    await expect(
+      service.generateSyntheticVariants(
+        {
+          jobId: 'job-foreign',
+          count: 3,
+          outputFormat: SyntheticOutputFormat.TXT,
         },
         'user-1',
       ),

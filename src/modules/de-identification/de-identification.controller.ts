@@ -7,11 +7,13 @@ import DeIdService from './de-identification.service';
 import {
   AnalyzeRequestDto,
   BulkUpdateEntityStatusesRequestDto,
+  GenerateSyntheticVariantsRequestDto,
   PreviewRequestDto,
 } from './dto/request.dto';
 import {
   AnalyzeResponseDto,
   BulkUpdateEntityStatusesResponseDto,
+  GenerateSyntheticVariantsResponseDto,
   PreviewResponseDto,
   RemoteNlpHealthResponseDto,
 } from './dto/response.dto';
@@ -58,6 +60,20 @@ export default class DeIdController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<BulkUpdateEntityStatusesResponseDto> {
     return this.deIdService.bulkUpdateEntityStatuses(dto, user.uuid);
+  }
+
+  @Post('synthetic')
+  @ApiOperation({ summary: 'Generate N synthetic variants of de-identified text' })
+  @ApiOkResponse({ type: GenerateSyntheticVariantsResponseDto })
+  async generateSyntheticVariants(
+    @Body() dto: GenerateSyntheticVariantsRequestDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<GenerateSyntheticVariantsResponseDto> {
+    const result = await this.deIdService.generateSyntheticVariants(dto, user.uuid);
+    const { archiveBuffer, ...response } = result;
+    // In full implementation, archiveBuffer would be streamed as file download
+    // For now, return metadata response
+    return response;
   }
 
   @Get('remote-nlp/health')
