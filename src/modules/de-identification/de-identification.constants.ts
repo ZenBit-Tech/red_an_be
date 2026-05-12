@@ -32,6 +32,10 @@ export const DE_ID_STATS_CONFIDENCE_BUCKETS = {
   UNDER_SIXTY: '<60%',
 };
 
+export const DE_ID_SYNTHETIC_DEFAULTS = {
+  MAX_VARIANTS: 20,
+};
+
 export const DE_ID_STATS_METHOD_LABELS = {
   UNKNOWN: 'Unknown',
 };
