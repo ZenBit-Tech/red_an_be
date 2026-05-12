@@ -1,12 +1,17 @@
-import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import JwtAuthGuard from '../auth/guards/jwt-auth.guard';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import DeIdService from './de-identification.service';
-import { AnalyzeRequestDto, PreviewRequestDto } from './dto/request.dto';
+import {
+  AnalyzeRequestDto,
+  BulkUpdateEntityStatusesRequestDto,
+  PreviewRequestDto,
+} from './dto/request.dto';
 import {
   AnalyzeResponseDto,
+  BulkUpdateEntityStatusesResponseDto,
   PreviewResponseDto,
   RemoteNlpHealthResponseDto,
 } from './dto/response.dto';
@@ -43,6 +48,16 @@ export default class DeIdController {
   ): Promise<PreviewResponseDto> {
     const text = await this.deIdService.getPreview(dto, user.uuid);
     return { anonymizedText: text };
+  }
+
+  @Patch('entities/statuses')
+  @ApiOperation({ summary: 'Persist active/inactive entity statuses for a job' })
+  @ApiOkResponse({ type: BulkUpdateEntityStatusesResponseDto })
+  async bulkUpdateEntityStatuses(
+    @Body() dto: BulkUpdateEntityStatusesRequestDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<BulkUpdateEntityStatusesResponseDto> {
+    return this.deIdService.bulkUpdateEntityStatuses(dto, user.uuid);
   }
 
   @Get('remote-nlp/health')

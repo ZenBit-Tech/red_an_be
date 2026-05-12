@@ -1,4 +1,8 @@
-import { BadRequestException, InternalServerErrorException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  InternalServerErrorException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash } from 'node:crypto';
 import { EntityManager } from 'typeorm';
@@ -7,6 +11,9 @@ import {
   DE_ID_CONFIG,
   DE_ID_EXTERNAL_RECOGNIZERS_ENV,
   DE_ID_REMOTE_NLP_ENV,
+  DetectedEntitySource,
+  DetectedEntityStatus,
+  DetectedEntitySystemReason,
 } from '@common/constants/compliance.constants';
 import DeIdJob from '@common/db/entities/de-id-job.entity';
 import DetectedEntity from '@common/db/entities/detected-entity.entity';
@@ -35,6 +42,8 @@ describe('DeIdService', () => {
     transaction: jest.Mock;
     findOne: jest.Mock;
     find: jest.Mock;
+    save: jest.Mock;
+    create: jest.Mock;
   };
   let presidioClientMock: {
     analyze: jest.Mock;
@@ -56,6 +65,12 @@ describe('DeIdService', () => {
       transaction: jest.fn(),
       findOne: jest.fn(),
       find: jest.fn(),
+      save: jest.fn(async (_target: unknown, value?: unknown) => value ?? _target),
+      create: jest.fn((target: unknown, payload: Record<string, unknown>) => ({
+        id: 'entity-manager-created',
+        target,
+        ...payload,
+      })),
     };
 
     presidioClientMock = {
@@ -1107,10 +1122,13 @@ describe('DeIdService', () => {
     } satisfies Partial<DetectedEntity>;
 
     entityManagerMock.find
-      .mockResolvedValueOnce([] satisfies Partial<DetectedEntity>[]) // 1st preview: activeEntities
-      .mockResolvedValueOnce([] satisfies Partial<DetectedEntity>[]) // 1st preview: mandatoryEntities
-      .mockResolvedValueOnce([organizationEntity] satisfies Partial<DetectedEntity>[]) // 2nd preview: activeEntities
-      .mockResolvedValueOnce([] satisfies Partial<DetectedEntity>[]); // 2nd preview: mandatoryEntities
+      .mockResolvedValueOnce([] satisfies Partial<DetectedEntity>[])
+      .mockResolvedValueOnce([
+        {
+          ...organizationEntity,
+          systemStatus: DetectedEntityStatus.ACTIVE,
+        },
+      ] satisfies Partial<DetectedEntity>[]);
 
     const previewWithoutOrganization = await service.getPreview({
       jobId: 'job-organization-mandatory',
@@ -1128,6 +1146,125 @@ describe('DeIdService', () => {
 
     expect(previewWithoutOrganization).toBe(text);
     expect(previewWithOrganization).toBe('Clinic: [REDACT]');
+  });
+
+  it('should use persisted effective active statuses in preview when activeIds are empty', async () => {
+    const text = 'Patient John Doe';
+    const hash = createHash('sha256').update(text).digest('hex');
+
+    entityManagerMock.findOne.mockResolvedValue({
+      id: 'job-persisted-preview',
+      framework: ComplianceFramework.HIPAA,
+      sourceTextHash: hash,
+      sourceTextLength: text.length,
+      userUuid: 'user-1',
+    } satisfies Partial<DeIdJob>);
+
+    entityManagerMock.find.mockResolvedValue([
+      {
+        id: 'entity-person',
+        jobId: 'job-persisted-preview',
+        category: 'PERSON',
+        confidence: 95,
+        start: 8,
+        end: 16,
+        proxyType: 'Redact',
+        systemStatus: DetectedEntityStatus.ACTIVE,
+        userStatus: DetectedEntityStatus.ACTIVE,
+      },
+    ] satisfies Partial<DetectedEntity>[]);
+
+    const preview = await service.getPreview(
+      {
+        jobId: 'job-persisted-preview',
+        text,
+        framework: ComplianceFramework.HIPAA,
+        activeIds: [],
+      },
+      'user-1',
+    );
+
+    expect(preview).toBe('Patient [REDACT]');
+  });
+
+  it('should bulk update entity statuses and return effective statuses', async () => {
+    entityManagerMock.findOne.mockResolvedValue({
+      id: 'job-bulk-update',
+      userUuid: 'user-1',
+    } satisfies Partial<DeIdJob>);
+
+    entityManagerMock.find.mockResolvedValue([
+      {
+        id: 'entity-1',
+        jobId: 'job-bulk-update',
+        category: 'PERSON',
+        confidence: 95,
+        start: 0,
+        end: 4,
+        proxyType: 'Redact',
+        systemStatus: DetectedEntityStatus.ACTIVE,
+        systemStatusReason: DetectedEntitySystemReason.ANALYZER_DETECTED,
+        source: DetectedEntitySource.ANALYZER,
+        isSyntheticEligible: true,
+      },
+      {
+        id: 'entity-2',
+        jobId: 'job-bulk-update',
+        category: 'DATE_TIME',
+        confidence: 90,
+        start: 10,
+        end: 14,
+        proxyType: 'Generalization',
+        systemStatus: DetectedEntityStatus.ACTIVE,
+        systemStatusReason: DetectedEntitySystemReason.ANALYZER_DETECTED,
+        source: DetectedEntitySource.ANALYZER,
+        isSyntheticEligible: true,
+      },
+    ] satisfies Partial<DetectedEntity>[]);
+
+    const result = await service.bulkUpdateEntityStatuses(
+      {
+        jobId: 'job-bulk-update',
+        activeEntityIds: ['entity-1'],
+      },
+      'user-1',
+    );
+
+    expect(entityManagerMock.save).toHaveBeenCalledTimes(1);
+    expect(result.updatedCount).toBe(2);
+    expect(result.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'entity-1',
+          userStatus: 'ACTIVE',
+          userStatusReason: 'USER_BULK_ACTIVATE',
+          effectiveStatus: 'ACTIVE',
+        }),
+        expect.objectContaining({
+          id: 'entity-2',
+          userStatus: 'INACTIVE',
+          userStatusReason: 'USER_BULK_DEACTIVATE',
+          effectiveStatus: 'INACTIVE',
+        }),
+      ]),
+    );
+  });
+
+  it('should reject bulk update for a job that does not belong to the user', async () => {
+    entityManagerMock.findOne.mockResolvedValue({
+      id: 'job-foreign',
+      userUuid: 'other-user',
+    } satisfies Partial<DeIdJob>);
+
+    await expect(
+      service.bulkUpdateEntityStatuses(
+        {
+          jobId: 'job-foreign',
+          activeEntityIds: [],
+        },
+        'user-1',
+      ),
+    ).rejects.toThrow(ForbiddenException);
   });
 
   it('should reject preview when text is inconsistent with analyzed input', async () => {
@@ -1205,19 +1342,18 @@ describe('DeIdService', () => {
       sourceTextLength: text.length,
     } satisfies Partial<DeIdJob>);
 
-    entityManagerMock.find
-      .mockResolvedValueOnce([] satisfies Partial<DetectedEntity>[]) // activeEntities
-      .mockResolvedValueOnce([
-        {
-          id: 'e-consultation-date',
-          jobId: 'job-consultation-month-year',
-          category: 'DATE_TIME',
-          confidence: 94,
-          start: dateStart,
-          end: dateEnd,
-          proxyType: 'Generalization',
-        },
-      ] satisfies Partial<DetectedEntity>[]);
+    entityManagerMock.find.mockResolvedValue([
+      {
+        id: 'e-consultation-date',
+        jobId: 'job-consultation-month-year',
+        category: 'DATE_TIME',
+        confidence: 94,
+        start: dateStart,
+        end: dateEnd,
+        proxyType: 'Generalization',
+        systemStatus: DetectedEntityStatus.ACTIVE,
+      },
+    ] satisfies Partial<DetectedEntity>[]);
 
     const preview = await service.getPreview({
       jobId: 'job-consultation-month-year',
@@ -1784,29 +1920,28 @@ describe('DeIdService', () => {
       sourceTextLength: text.length,
     } satisfies Partial<DeIdJob>);
 
-    entityManagerMock.find
-      .mockResolvedValueOnce([
-        {
-          id: 'e-phone-split-gdpr',
-          jobId: 'job-split-phone-preview-gdpr',
-          category: 'PHONE_NUMBER',
-          confidence: 98,
-          start: text.indexOf('+49'),
-          end: text.indexOf('1234567') - 1,
-          proxyType: 'Redact',
-        },
-      ] satisfies Partial<DetectedEntity>[])
-      .mockResolvedValueOnce([
-        {
-          id: 'e-national-id-tail-gdpr',
-          jobId: 'job-split-phone-preview-gdpr',
-          category: 'NATIONAL_ID',
-          confidence: 95,
-          start: text.indexOf('1234567'),
-          end: text.indexOf('1234567') + '1234567'.length,
-          proxyType: 'Redact',
-        },
-      ] satisfies Partial<DetectedEntity>[]);
+    entityManagerMock.find.mockResolvedValue([
+      {
+        id: 'e-phone-split-gdpr',
+        jobId: 'job-split-phone-preview-gdpr',
+        category: 'PHONE_NUMBER',
+        confidence: 98,
+        start: text.indexOf('+49'),
+        end: text.indexOf('1234567') - 1,
+        proxyType: 'Redact',
+        systemStatus: DetectedEntityStatus.ACTIVE,
+      },
+      {
+        id: 'e-national-id-tail-gdpr',
+        jobId: 'job-split-phone-preview-gdpr',
+        category: 'NATIONAL_ID',
+        confidence: 95,
+        start: text.indexOf('1234567'),
+        end: text.indexOf('1234567') + '1234567'.length,
+        proxyType: 'Redact',
+        systemStatus: DetectedEntityStatus.ACTIVE,
+      },
+    ] satisfies Partial<DetectedEntity>[]);
 
     const preview = await service.getPreview({
       jobId: 'job-split-phone-preview-gdpr',
@@ -2692,9 +2827,7 @@ describe('DeIdService', () => {
     } satisfies Partial<DeIdJob>);
 
     // First call: OCCUPATION not in activeIds → not redacted
-    entityManagerMock.find
-      .mockResolvedValueOnce([] satisfies Partial<DetectedEntity>[]) // activeEntities
-      .mockResolvedValueOnce([] satisfies Partial<DetectedEntity>[]); // mandatoryEntities
+    entityManagerMock.find.mockResolvedValueOnce([] satisfies Partial<DetectedEntity>[]);
 
     const previewWithout = await service.getPreview({
       jobId: 'job-occupation-toggle',
@@ -2704,9 +2837,12 @@ describe('DeIdService', () => {
     });
 
     // Second call: OCCUPATION in activeIds → redacted
-    entityManagerMock.find
-      .mockResolvedValueOnce([occupationEntity] satisfies Partial<DetectedEntity>[]) // activeEntities
-      .mockResolvedValueOnce([] satisfies Partial<DetectedEntity>[]); // mandatoryEntities
+    entityManagerMock.find.mockResolvedValueOnce([
+      {
+        ...occupationEntity,
+        systemStatus: DetectedEntityStatus.ACTIVE,
+      },
+    ] satisfies Partial<DetectedEntity>[]);
 
     const previewWith = await service.getPreview({
       jobId: 'job-occupation-toggle',

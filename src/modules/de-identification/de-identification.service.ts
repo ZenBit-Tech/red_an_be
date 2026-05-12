@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   InternalServerErrorException,
   Logger,
@@ -7,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash } from 'node:crypto';
-import { EntityManager, In } from 'typeorm';
+import { EntityManager } from 'typeorm';
 
 import {
   ComplianceFramework,
@@ -18,6 +19,7 @@ import {
   DetectedEntitySource,
   DetectedEntityStatus,
   DetectedEntitySystemReason,
+  DetectedEntityUserReason,
   DeIdMethod,
 } from '@common/constants/compliance.constants';
 import DeIdJob, { DeIdJobStatus } from '@common/db/entities/de-id-job.entity';
@@ -26,7 +28,11 @@ import { shouldKeepOriginalByContext } from './context/context-aware.util';
 import { normalizeAnonymizedText } from './context/normalization.util';
 import { PhiLeakDetectedError, ValidationOptions, validatePhi } from './context/phi-validator.util';
 
-import { AnalyzeRequestDto, PreviewRequestDto } from './dto/request.dto';
+import {
+  AnalyzeRequestDto,
+  BulkUpdateEntityStatusesRequestDto,
+  PreviewRequestDto,
+} from './dto/request.dto';
 import PresidioClient from './presidio.client';
 import RemoteNlpClient, { type RemoteNlpHealthStatus } from './remote-nlp.client';
 import {
@@ -374,6 +380,12 @@ type RemoteNlpHealthResult = {
   details: string;
 };
 
+type BulkUpdateEntityStatusesResult = {
+  jobId: string;
+  updatedCount: number;
+  findings: Array<DetectedEntity & { effectiveStatus: DetectedEntityStatus }>;
+};
+
 @Injectable()
 export default class DeIdService {
   private readonly logger = new Logger(DeIdService.name);
@@ -661,8 +673,8 @@ export default class DeIdService {
         throw new BadRequestException('Preview text does not match analyzed input');
       }
 
-      const activeEntities = await this.entityManager.find(DetectedEntity, {
-        where: { jobId: dto.jobId, id: In(dto.activeIds) },
+      const allEntities = await this.entityManager.find(DetectedEntity, {
+        where: { jobId: dto.jobId },
         order: { start: 'ASC' },
       });
 
@@ -673,29 +685,32 @@ export default class DeIdService {
         ? GDPR_MANDATORY_PREVIEW_ENTITY_CATEGORIES
         : MANDATORY_PREVIEW_ENTITY_CATEGORIES;
 
-      const mandatoryEntities = await this.entityManager.find(DetectedEntity, {
-        where: {
-          jobId: dto.jobId,
-          category: In([...mandatoryCategories]),
-        },
-        order: { start: 'ASC' },
+      const activeEntityIds = new Set(dto.activeIds);
+      const mandatoryCategorySet = new Set<string>(mandatoryCategories);
+      const effectiveActiveEntities = allEntities.filter((entity) => {
+        const effectiveStatus = DeIdService.getEffectiveStatus(entity);
+        const isMandatoryCategory = mandatoryCategorySet.has(entity.category);
+        const isSelectedById = activeEntityIds.size === 0 || activeEntityIds.has(entity.id);
+
+        if (effectiveStatus !== DetectedEntityStatus.ACTIVE) {
+          return false;
+        }
+
+        return isMandatoryCategory || isSelectedById;
       });
 
-      const mergedEntitiesById = [...activeEntities, ...mandatoryEntities].reduce<
-        Record<string, DetectedEntity>
-      >((acc, entity) => {
-        acc[entity.id] = entity;
-        return acc;
-      }, {});
-
-      const effectiveActiveEntities = Object.values(mergedEntitiesById).filter(
-        (entity) => DeIdService.getEffectiveStatus(entity) === DetectedEntityStatus.ACTIVE,
+      const mergedEntitiesById = effectiveActiveEntities.reduce<Record<string, DetectedEntity>>(
+        (acc, entity) => {
+          acc[entity.id] = entity;
+          return acc;
+        },
+        {},
       );
 
       const normalizedEntities = DeIdService.normalizeGdprPhoneLikeSpans(
         dto.framework,
         dto.text,
-        effectiveActiveEntities,
+        Object.values(mergedEntitiesById),
         (entity) => entity.category,
         (entity, end) => ({ ...entity, end }),
       );
@@ -777,6 +792,55 @@ export default class DeIdService {
       this.logger.error(`Preview failed: ${message}`);
       throw new InternalServerErrorException('Failed to generate anonymization preview');
     }
+  }
+
+  public async bulkUpdateEntityStatuses(
+    dto: BulkUpdateEntityStatusesRequestDto,
+    userUuid: string,
+  ): Promise<BulkUpdateEntityStatusesResult> {
+    const job = await this.entityManager.findOne(DeIdJob, {
+      where: { id: dto.jobId },
+    });
+
+    if (!job || job.userUuid !== userUuid) {
+      throw new ForbiddenException('You do not have access to update entity statuses for this job');
+    }
+
+    const entities = await this.entityManager.find(DetectedEntity, {
+      where: { jobId: dto.jobId },
+      order: { start: 'ASC' },
+    });
+
+    const entityIds = new Set(entities.map((entity) => entity.id));
+    const invalidIds = dto.activeEntityIds.filter((entityId) => !entityIds.has(entityId));
+
+    if (invalidIds.length > 0) {
+      throw new BadRequestException('Some entity ids do not belong to the specified job');
+    }
+
+    const now = new Date();
+    const activeEntityIds = new Set(dto.activeEntityIds);
+    const updatedEntities = entities.map((entity) => {
+      const shouldBeActive = activeEntityIds.has(entity.id);
+
+      return {
+        ...entity,
+        userStatus: shouldBeActive ? DetectedEntityStatus.ACTIVE : DetectedEntityStatus.INACTIVE,
+        userStatusReason: shouldBeActive
+          ? DetectedEntityUserReason.USER_BULK_ACTIVATE
+          : DetectedEntityUserReason.USER_BULK_DEACTIVATE,
+        statusUpdatedAt: now,
+        statusUpdatedByUserUuid: userUuid,
+      } satisfies DetectedEntity;
+    });
+
+    const savedEntities = await this.entityManager.save(DetectedEntity, updatedEntities);
+
+    return {
+      jobId: dto.jobId,
+      updatedCount: savedEntities.length,
+      findings: savedEntities.map((entity) => DeIdService.withEffectiveStatus(entity)),
+    };
   }
 
   private getPhiValidationOptions(framework?: ComplianceFramework): ValidationOptions {

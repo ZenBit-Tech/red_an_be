@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ArrayUnique,
   IsString,
   IsEnum,
   IsNumber,
@@ -11,7 +12,7 @@ import {
   IsArray,
   IsUUID,
 } from 'class-validator';
-import { ComplianceFramework } from '@common/constants/compliance.constants';
+import { ComplianceFramework, DetectedEntityStatus } from '@common/constants/compliance.constants';
 
 export class AnalyzeRequestDto {
   @ApiProperty({ example: 'Patient John Doe, born 1980-05-15...' })
@@ -64,4 +65,30 @@ export class PreviewRequestDto {
   @IsArray()
   @IsUUID('4', { each: true })
   readonly activeIds!: string[];
+}
+
+export class BulkUpdateEntityStatusesRequestDto {
+  @ApiProperty({ example: '550e8400-e29b-41d4-a716-446655440000' })
+  @IsUUID('4')
+  readonly jobId!: string;
+
+  @ApiProperty({
+    description:
+      'Entity UUIDs that should be marked as active. All remaining job entities become inactive.',
+    example: ['550e8400-e29b-41d4-a716-446655440010', '550e8400-e29b-41d4-a716-446655440011'],
+  })
+  @IsArray()
+  @ArrayUnique()
+  @IsUUID('4', { each: true })
+  readonly activeEntityIds!: string[];
+}
+
+export class ResetEntityStatusRequestDto {
+  @ApiProperty({ example: '550e8400-e29b-41d4-a716-446655440010' })
+  @IsUUID('4')
+  readonly entityId!: string;
+
+  @ApiProperty({ enum: DetectedEntityStatus, example: DetectedEntityStatus.ACTIVE })
+  @IsEnum(DetectedEntityStatus)
+  readonly fallbackStatus!: DetectedEntityStatus;
 }

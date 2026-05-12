@@ -46,6 +46,9 @@ export class DetectedEntityResponseDto {
   @ApiProperty({ enum: DetectedEntitySource, example: DetectedEntitySource.ANALYZER })
   readonly source!: DetectedEntitySource;
 
+  @ApiProperty({ enum: DetectedEntityStatus, example: DetectedEntityStatus.ACTIVE })
+  readonly effectiveStatus!: DetectedEntityStatus;
+
   @ApiProperty({ example: true })
   readonly isSyntheticEligible!: boolean;
 }
@@ -61,6 +64,17 @@ export class AnalyzeResponseDto {
 export class PreviewResponseDto {
   @ApiProperty({ example: '[PERSON_1] was born on [DATE_SHIFTED_1].' })
   readonly anonymizedText!: string;
+}
+
+export class BulkUpdateEntityStatusesResponseDto {
+  @ApiProperty({ example: '550e8400-e29b-41d4-a716-446655440000' })
+  readonly jobId!: string;
+
+  @ApiProperty({ example: 4 })
+  readonly updatedCount!: number;
+
+  @ApiProperty({ type: [DetectedEntityResponseDto] })
+  readonly findings!: DetectedEntityResponseDto[];
 }
 
 export class RemoteNlpHealthResponseDto {

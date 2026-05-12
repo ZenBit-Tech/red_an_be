@@ -1,11 +1,18 @@
 import DeIdController from './de-identification.controller';
 import { DeIdStatsPeriod } from './de-identification.constants';
 import DeIdService from './de-identification.service';
-import { AnalyzeRequestDto, PreviewRequestDto } from './dto/request.dto';
+import {
+  AnalyzeRequestDto,
+  BulkUpdateEntityStatusesRequestDto,
+  PreviewRequestDto,
+} from './dto/request.dto';
 import { DeIdStatsQueryDto } from './dto/stats-query.dto';
 import StatsService from './stats.service';
 
-type DeIdServiceContract = Pick<DeIdService, 'analyzeText' | 'getPreview' | 'getRemoteNlpHealth'>;
+type DeIdServiceContract = Pick<
+  DeIdService,
+  'analyzeText' | 'bulkUpdateEntityStatuses' | 'getPreview' | 'getRemoteNlpHealth'
+>;
 type StatsServiceContract = Pick<StatsService, 'getDashboardData'>;
 const TEST_USER = {
   uuid: 'user-uuid-1',
@@ -16,6 +23,7 @@ describe('DeIdController', () => {
   let controller: DeIdController;
   let deIdServiceMock: {
     analyzeText: jest.Mock;
+    bulkUpdateEntityStatuses: jest.Mock;
     getPreview: jest.Mock;
     getRemoteNlpHealth: jest.Mock;
   };
@@ -26,6 +34,7 @@ describe('DeIdController', () => {
   beforeEach(() => {
     deIdServiceMock = {
       analyzeText: jest.fn(),
+      bulkUpdateEntityStatuses: jest.fn(),
       getPreview: jest.fn(),
       getRemoteNlpHealth: jest.fn(),
     };
@@ -80,6 +89,29 @@ describe('DeIdController', () => {
     expect(deIdServiceMock.getPreview).toHaveBeenCalledTimes(1);
     expect(deIdServiceMock.getPreview).toHaveBeenCalledWith(dto, TEST_USER.uuid);
     expect(result).toEqual({ anonymizedText: '[REDACT] Doe' });
+  });
+
+  it('should call service bulkUpdateEntityStatuses', async () => {
+    const dto: BulkUpdateEntityStatusesRequestDto = {
+      jobId: 'job-1',
+      activeEntityIds: ['entity-1', 'entity-2'],
+    };
+
+    deIdServiceMock.bulkUpdateEntityStatuses.mockResolvedValue({
+      jobId: 'job-1',
+      updatedCount: 2,
+      findings: [],
+    });
+
+    const result = await controller.bulkUpdateEntityStatuses(dto, TEST_USER);
+
+    expect(deIdServiceMock.bulkUpdateEntityStatuses).toHaveBeenCalledTimes(1);
+    expect(deIdServiceMock.bulkUpdateEntityStatuses).toHaveBeenCalledWith(dto, TEST_USER.uuid);
+    expect(result).toEqual({
+      jobId: 'job-1',
+      updatedCount: 2,
+      findings: [],
+    });
   });
 
   it('should return remote NLP health status', async () => {
