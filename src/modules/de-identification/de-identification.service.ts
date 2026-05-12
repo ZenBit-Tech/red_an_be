@@ -15,6 +15,9 @@ import {
   DE_ID_EXTERNAL_RECOGNIZERS_ENV,
   DE_ID_POST_VALIDATION_ENV,
   DE_ID_REMOTE_NLP_ENV,
+  DetectedEntitySource,
+  DetectedEntityStatus,
+  DetectedEntitySystemReason,
   DeIdMethod,
 } from '@common/constants/compliance.constants';
 import DeIdJob, { DeIdJobStatus } from '@common/db/entities/de-id-job.entity';
@@ -361,7 +364,7 @@ type PreviewSpan = {
 
 type AnalyzeResult = {
   jobId: string;
-  findings: DetectedEntity[];
+  findings: Array<DetectedEntity & { effectiveStatus: DetectedEntityStatus }>;
 };
 
 type RemoteNlpHealthResult = {
@@ -506,19 +509,89 @@ export default class DeIdService {
         const finalFindings =
           DeIdService.filterNationalIdOverlappingWithPhoneNumber(normalizedFindings);
 
-        const entities = finalFindings.map((finding) =>
-          tm.create(DetectedEntity, {
+        const postProcessorFindings = [
+          ...clinicHeaderFindings,
+          ...structuredAddressFindings,
+          ...structuredPhoneFindings,
+          ...structuredDobFindings,
+          ...structuredIssueDateFindings,
+          ...structuredNationalIdFindings,
+          ...occupationFindings,
+        ];
+
+        const contextFilteredFindingKeys = new Set(
+          contextFilteredFindings.map((finding) => DeIdService.getFindingKey(finding)),
+        );
+        const normalizedFindingKeys = new Set(
+          normalizedFindings.map((finding) => DeIdService.getFindingKey(finding)),
+        );
+        const finalFindingKeys = new Set(
+          finalFindings.map((finding) => DeIdService.getFindingKey(finding)),
+        );
+        const postProcessorFindingKeys = new Set(
+          postProcessorFindings.map((finding) => DeIdService.getFindingKey(finding)),
+        );
+
+        const activeEntities = finalFindings.map((finding) => {
+          const findingKey = DeIdService.getFindingKey(finding);
+          const source = postProcessorFindingKeys.has(findingKey)
+            ? DetectedEntitySource.POSTPROCESSOR
+            : DetectedEntitySource.ANALYZER;
+          const reason = postProcessorFindingKeys.has(findingKey)
+            ? DetectedEntitySystemReason.POSTPROCESSOR_ADDED
+            : DetectedEntitySystemReason.ANALYZER_DETECTED;
+
+          return tm.create(DetectedEntity, {
             jobId: job.id,
             category: finding.entity_type,
             confidence: finding.score * 100,
             start: finding.start,
             end: finding.end,
             proxyType: DeIdService.mapToProxyType(dto.framework, finding.entity_type),
-          }),
-        );
+            systemStatus: DetectedEntityStatus.ACTIVE,
+            systemStatusReason: reason,
+            source,
+            isSyntheticEligible: true,
+          });
+        });
+
+        const inactiveEntities = enrichedFindings
+          .filter((finding) => !finalFindingKeys.has(DeIdService.getFindingKey(finding)))
+          .map((finding) => {
+            const findingKey = DeIdService.getFindingKey(finding);
+
+            let reason = DetectedEntitySystemReason.FILTERED_RULE;
+            if (!contextFilteredFindingKeys.has(findingKey)) {
+              reason = DetectedEntitySystemReason.FILTERED_CONTEXT;
+            } else if (normalizedFindingKeys.has(findingKey)) {
+              reason = DetectedEntitySystemReason.FILTERED_OVERLAP;
+            }
+
+            const source = postProcessorFindingKeys.has(findingKey)
+              ? DetectedEntitySource.POSTPROCESSOR
+              : DetectedEntitySource.ANALYZER;
+
+            return tm.create(DetectedEntity, {
+              jobId: job.id,
+              category: finding.entity_type,
+              confidence: finding.score * 100,
+              start: finding.start,
+              end: finding.end,
+              proxyType: DeIdService.mapToProxyType(dto.framework, finding.entity_type),
+              systemStatus: DetectedEntityStatus.INACTIVE,
+              systemStatusReason: reason,
+              source,
+              isSyntheticEligible: false,
+            });
+          });
+
+        const entities = [...activeEntities, ...inactiveEntities];
 
         const savedEntities = await tm.save(entities);
-        return { jobId: job.id, findings: savedEntities };
+        const findingsWithEffectiveStatus = savedEntities.map((entity) =>
+          DeIdService.withEffectiveStatus(entity),
+        );
+        return { jobId: job.id, findings: findingsWithEffectiveStatus };
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
         this.logger.error(`Analysis failed: ${message}`);
@@ -615,10 +688,14 @@ export default class DeIdService {
         return acc;
       }, {});
 
+      const effectiveActiveEntities = Object.values(mergedEntitiesById).filter(
+        (entity) => DeIdService.getEffectiveStatus(entity) === DetectedEntityStatus.ACTIVE,
+      );
+
       const normalizedEntities = DeIdService.normalizeGdprPhoneLikeSpans(
         dto.framework,
         dto.text,
-        Object.values(mergedEntitiesById),
+        effectiveActiveEntities,
         (entity) => entity.category,
         (entity, end) => ({ ...entity, end }),
       );
@@ -1087,6 +1164,29 @@ export default class DeIdService {
     }
 
     return [];
+  }
+
+  private static getEffectiveStatus(
+    entity: Pick<DetectedEntity, 'systemStatus' | 'userStatus'>,
+  ): DetectedEntityStatus {
+    if (entity.userStatus) {
+      return entity.userStatus;
+    }
+
+    return entity.systemStatus ?? DetectedEntityStatus.ACTIVE;
+  }
+
+  private static withEffectiveStatus(
+    entity: DetectedEntity,
+  ): DetectedEntity & { effectiveStatus: DetectedEntityStatus } {
+    return {
+      ...entity,
+      effectiveStatus: DeIdService.getEffectiveStatus(entity),
+    };
+  }
+
+  private static getFindingKey(finding: AnalyzerFinding): string {
+    return `${finding.entity_type}:${finding.start}:${finding.end}`;
   }
 
   private async callAnalyzerPipeline(

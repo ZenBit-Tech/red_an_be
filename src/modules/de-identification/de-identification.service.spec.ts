@@ -193,8 +193,12 @@ describe('DeIdService', () => {
       start: 9,
       end: 23,
       proxyType: 'Redact',
+      systemStatus: 'ACTIVE',
     });
-    expect(nationalIdFinding).toBeUndefined();
+    expect(nationalIdFinding).toMatchObject({
+      systemStatus: 'INACTIVE',
+      isSyntheticEligible: false,
+    });
   });
 
   it('should pass strengthened clinic organization recognizer for HIPAA analysis', async () => {
@@ -1548,7 +1552,10 @@ describe('DeIdService', () => {
     const dateFinding = result.findings.find((finding) => finding.category === 'DATE_TIME');
 
     expect(phoneFinding).toBeDefined();
-    expect(dateFinding).toBeUndefined();
+    expect(dateFinding).toMatchObject({
+      systemStatus: 'INACTIVE',
+      isSyntheticEligible: false,
+    });
   });
 
   it('should avoid broken output when preview spans overlap around DOB and Gender fields', async () => {
@@ -2833,7 +2840,11 @@ describe('DeIdService', () => {
         preserveStructure: false,
       });
 
-      expect(result.findings).toHaveLength(0);
+      expect(result.findings).toHaveLength(1);
+      expect(result.findings[0]).toMatchObject({
+        category: 'DATE_TIME',
+        systemStatus: 'INACTIVE',
+      });
     });
 
     it('should filter out medical units from Allow List (mg, ml, daily, etc)', async () => {
@@ -2934,10 +2945,16 @@ describe('DeIdService', () => {
         preserveStructure: false,
       });
 
-      expect(result.findings).toHaveLength(1);
-      expect(result.findings[0].category).toBe('DATE_TIME');
-      expect(result.findings[0].start).toBe(17);
-      expect(result.findings[0].end).toBe(27);
+      const activeFindings = result.findings.filter((finding) => finding.systemStatus === 'ACTIVE');
+      const inactiveFindings = result.findings.filter(
+        (finding) => finding.systemStatus === 'INACTIVE',
+      );
+
+      expect(activeFindings).toHaveLength(1);
+      expect(activeFindings[0].category).toBe('DATE_TIME');
+      expect(activeFindings[0].start).toBe(17);
+      expect(activeFindings[0].end).toBe(27);
+      expect(inactiveFindings).toHaveLength(2);
     });
 
     it('should keep DATE_TIME in consultation date context', async () => {
@@ -3035,7 +3052,11 @@ describe('DeIdService', () => {
         preserveStructure: false,
       });
 
-      expect(result.findings).toHaveLength(0);
+      expect(result.findings).toHaveLength(1);
+      expect(result.findings[0]).toMatchObject({
+        category: 'DATE_TIME',
+        systemStatus: 'INACTIVE',
+      });
     });
 
     it('should filter doctor credentials like MD from location false positives', async () => {
@@ -3066,7 +3087,11 @@ describe('DeIdService', () => {
         preserveStructure: false,
       });
 
-      expect(result.findings).toHaveLength(0);
+      expect(result.findings).toHaveLength(1);
+      expect(result.findings[0]).toMatchObject({
+        category: 'LOCATION',
+        systemStatus: 'INACTIVE',
+      });
     });
 
     it('should filter HEENT abbreviation as medical allow-list term', async () => {
@@ -3105,7 +3130,11 @@ describe('DeIdService', () => {
         preserveStructure: false,
       });
 
-      expect(result.findings).toHaveLength(0);
+      expect(result.findings).toHaveLength(1);
+      expect(result.findings[0]).toMatchObject({
+        category: 'LOCATION',
+        systemStatus: 'INACTIVE',
+      });
     });
 
     it('should keep ZIP codes as high-risk HIPAA findings', async () => {

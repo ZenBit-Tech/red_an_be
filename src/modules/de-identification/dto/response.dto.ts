@@ -1,4 +1,10 @@
 import { ApiProperty } from '@nestjs/swagger';
+import {
+  DetectedEntitySource,
+  DetectedEntityStatus,
+  DetectedEntitySystemReason,
+  DetectedEntityUserReason,
+} from '@common/constants/compliance.constants';
 
 export class DetectedEntityResponseDto {
   @ApiProperty({ example: '550e8400-e29b-41d4-a716-446655440000' })
@@ -21,6 +27,24 @@ export class DetectedEntityResponseDto {
 
   @ApiProperty({ example: 'Hash' })
   readonly proxyType!: string;
+
+  @ApiProperty({ enum: DetectedEntityStatus, example: DetectedEntityStatus.ACTIVE })
+  readonly systemStatus!: DetectedEntityStatus;
+
+  @ApiProperty({ enum: DetectedEntitySystemReason, example: DetectedEntitySystemReason.ANALYZER_DETECTED })
+  readonly systemStatusReason!: DetectedEntitySystemReason;
+
+  @ApiProperty({ enum: DetectedEntityStatus, nullable: true, example: null })
+  readonly userStatus!: DetectedEntityStatus | null;
+
+  @ApiProperty({ enum: DetectedEntityUserReason, nullable: true, example: null })
+  readonly userStatusReason!: DetectedEntityUserReason | null;
+
+  @ApiProperty({ enum: DetectedEntitySource, example: DetectedEntitySource.ANALYZER })
+  readonly source!: DetectedEntitySource;
+
+  @ApiProperty({ example: true })
+  readonly isSyntheticEligible!: boolean;
 }
 
 export class AnalyzeResponseDto {
