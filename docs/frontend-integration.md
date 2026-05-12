@@ -35,6 +35,98 @@ Success response:
 }
 ```
 
+### Persist entity statuses
+
+Endpoint:
+
+```http
+PATCH /de-identification/entities/statuses
+Content-Type: application/json
+Authorization: Bearer <jwt-token>
+```
+
+Request body:
+
+```json
+{
+  "jobId": "550e8400-e29b-41d4-a716-446655440000",
+  "activeEntityIds": [
+    "550e8400-e29b-41d4-a716-446655440010",
+    "550e8400-e29b-41d4-a716-446655440011"
+  ]
+}
+```
+
+Semantics:
+
+- IDs from `activeEntityIds` are persisted as active.
+- All other entities in the same job are persisted as inactive.
+
+Success response:
+
+```json
+{
+  "jobId": "550e8400-e29b-41d4-a716-446655440000",
+  "updatedCount": 4,
+  "findings": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440010",
+      "jobId": "550e8400-e29b-41d4-a716-446655440000",
+      "category": "PERSON",
+      "confidence": 98.7,
+      "start": 8,
+      "end": 16,
+      "proxyType": "Hash",
+      "systemStatus": "ACTIVE",
+      "systemStatusReason": "ANALYZER_DETECTED",
+      "userStatus": "ACTIVE",
+      "userStatusReason": "USER_BULK_ACTIVATE",
+      "source": "ANALYZER",
+      "effectiveStatus": "ACTIVE",
+      "isSyntheticEligible": true
+    }
+  ]
+}
+```
+
+### Generate synthetic variants (ZIP download)
+
+Endpoint:
+
+```http
+POST /de-identification/synthetic
+Content-Type: application/json
+Authorization: Bearer <jwt-token>
+```
+
+Request body:
+
+```json
+{
+  "jobId": "550e8400-e29b-41d4-a716-446655440000",
+  "text": "Patient John Doe, born 1980-05-15...",
+  "count": 5,
+  "outputFormat": "txt"
+}
+```
+
+Supported `outputFormat` values:
+
+- `txt`
+- `pdf`
+
+Response:
+
+- `200 OK`
+- `Content-Type: application/zip`
+- `Content-Disposition: attachment; filename="synthetic-variants-<jobId>-<timestamp>.zip"`
+- Binary ZIP payload.
+
+Important behavior:
+
+- `text` must match the original analyzed document for the `jobId` (hash + length validation).
+- Only entities with persisted `effectiveStatus=ACTIVE` are used for synthetic generation.
+
 ### 2) Verify magic link and get access token
 
 Endpoint:
@@ -265,6 +357,47 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   }
 
   return response.json() as Promise<T>;
+}
+```
+
+Synthetic ZIP download example:
+
+```ts
+type DownloadSyntheticPayload = {
+  jobId: string;
+  text: string;
+  count: number;
+  outputFormat: 'txt' | 'pdf';
+};
+
+export async function downloadSyntheticVariants(
+  payload: DownloadSyntheticPayload,
+  token: string,
+): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/de-identification/synthetic`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Synthetic generation failed: ${response.status}`);
+  }
+
+  const blob = await response.blob();
+  const contentDisposition = response.headers.get('content-disposition');
+  const filenameMatch = contentDisposition?.match(/filename="(.+)"/i);
+  const filename = filenameMatch?.[1] ?? 'synthetic-variants.zip';
+
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 ```
 
