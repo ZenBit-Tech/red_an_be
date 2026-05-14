@@ -4,6 +4,7 @@ import {
   Injectable,
   InternalServerErrorException,
   Logger,
+  NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -33,13 +34,20 @@ import { PhiLeakDetectedError, ValidationOptions, validatePhi } from './context/
 import {
   AnalyzeRequestDto,
   BulkUpdateEntityStatusesRequestDto,
+  PreviewValidationMode,
   GenerateSyntheticVariantsRequestDto,
+  GenerateSyntheticTableRequestDto,
   PreviewRequestDto,
+  RegenerateSyntheticTableRequestDto,
   SyntheticOutputFormat,
 } from './dto/request.dto';
 import { DE_ID_SYNTHETIC_CONFIG, DE_ID_SYNTHETIC_DEFAULTS } from './de-identification.constants';
 import PresidioClient from './presidio.client';
 import RemoteNlpClient, { type RemoteNlpHealthStatus } from './remote-nlp.client';
+import SyntheticGenerationStore, {
+  type EntityInstanceMapping,
+  type SyntheticEntityRow,
+} from './synthetic-generation.store';
 import {
   CLINICAL_NLP_ENTITY_TYPES,
   DEFAULT_ENTITY_STRATEGY,
@@ -438,6 +446,34 @@ type GenerateSyntheticVariantsResult = {
   archiveBuffer: Buffer;
 };
 
+type SyntheticTableSummary = {
+  totalRows: number;
+  generatedAt: string;
+  framework: string;
+};
+
+type GenerateSyntheticTableResult = {
+  generationId: string;
+  columns: string[];
+  rows: SyntheticEntityRow[];
+  summary: SyntheticTableSummary;
+};
+
+type PreviewPostValidationSummaryItem = {
+  type: string;
+  count: number;
+};
+
+type PreviewResult = {
+  anonymizedText: string;
+  postValidation: {
+    valid: boolean;
+    mode: PreviewValidationMode;
+    leaks: Array<{ type: string; match: string; index: number }>;
+    summary: PreviewPostValidationSummaryItem[];
+  };
+};
+
 @Injectable()
 export default class DeIdService {
   private readonly logger = new Logger(DeIdService.name);
@@ -447,6 +483,7 @@ export default class DeIdService {
     private readonly presidioClient: PresidioClient,
     private readonly remoteNlpClient: RemoteNlpClient,
     private readonly configService: ConfigService,
+    private readonly syntheticGenerationStore: SyntheticGenerationStore,
   ) {}
 
   public async analyzeText(dto: AnalyzeRequestDto, userUuid?: string): Promise<AnalyzeResult> {
@@ -706,7 +743,10 @@ export default class DeIdService {
     return DEFAULT_ANALYSIS_FAILURE_CODE;
   }
 
-  public async getPreview(dto: PreviewRequestDto, userUuid?: string): Promise<string> {
+  public async getPreviewWithValidation(
+    dto: PreviewRequestDto,
+    userUuid?: string,
+  ): Promise<PreviewResult> {
     try {
       const job = await this.entityManager.findOne(DeIdJob, {
         where: userUuid ? { id: dto.jobId, userUuid } : { id: dto.jobId },
@@ -817,7 +857,8 @@ export default class DeIdService {
       }, dto.text);
 
       const normalizedText = normalizeAnonymizedText(anonymizedText);
-      const validationOptions = this.getPhiValidationOptions(dto.framework);
+      const validationMode = dto.validationMode ?? PreviewValidationMode.STRICT;
+      const validationOptions = this.getPhiValidationOptions(dto.framework, validationMode);
       const validationResult = validatePhi(normalizedText, validationOptions);
 
       if (!validationResult.valid) {
@@ -826,7 +867,15 @@ export default class DeIdService {
         );
       }
 
-      return normalizedText;
+      return {
+        anonymizedText: normalizedText,
+        postValidation: {
+          valid: validationResult.valid,
+          mode: validationMode,
+          leaks: validationResult.leaks,
+          summary: DeIdService.buildLeakSummary(validationResult.leaks),
+        },
+      };
     } catch (error: unknown) {
       if (error instanceof BadRequestException) {
         throw error;
@@ -844,6 +893,11 @@ export default class DeIdService {
       this.logger.error(`Preview failed: ${message}`);
       throw new InternalServerErrorException('Failed to generate anonymization preview');
     }
+  }
+
+  public async getPreview(dto: PreviewRequestDto, userUuid?: string): Promise<string> {
+    const result = await this.getPreviewWithValidation(dto, userUuid);
+    return result.anonymizedText;
   }
 
   public async bulkUpdateEntityStatuses(
@@ -964,6 +1018,190 @@ export default class DeIdService {
     }
   }
 
+  public async generateSyntheticTable(
+    dto: GenerateSyntheticTableRequestDto,
+    userUuid: string,
+  ): Promise<GenerateSyntheticTableResult> {
+    try {
+      const job = await this.entityManager.findOne(DeIdJob, {
+        where: { id: dto.jobId, userUuid },
+      });
+
+      if (!job) {
+        throw new ForbiddenException(
+          'You do not have access to generate synthetic data for this job',
+        );
+      }
+
+      const textHash = DeIdService.calculateTextHash(dto.text);
+      if (job.sourceTextHash !== textHash || job.sourceTextLength !== dto.text.length) {
+        throw new BadRequestException('Synthetic text does not match analyzed input');
+      }
+
+      const entities = await this.entityManager.find(DetectedEntity, {
+        where: { jobId: dto.jobId },
+        order: { start: 'ASC' },
+      });
+
+      const activeEntities = entities.filter(
+        (entity) => DeIdService.getEffectiveStatus(entity) === DetectedEntityStatus.ACTIVE,
+      );
+
+      if (activeEntities.length === 0) {
+        throw new BadRequestException('No active entities found to generate synthetic data');
+      }
+
+      const configuredMaxVariants = this.getSyntheticMaxVariants();
+      const boundedCount = Math.min(dto.count, configuredMaxVariants);
+      const variantsCount = Math.max(boundedCount, SYNTHETIC_VARIANTS_MIN_COUNT);
+      const baseOrdinal = 0;
+
+      const { columns, entityMappings, entityRows } = DeIdService.buildSyntheticEntityRows(
+        dto.text,
+        job.framework,
+        activeEntities,
+        variantsCount,
+        baseOrdinal,
+      );
+
+      const generationId = this.syntheticGenerationStore.save({
+        jobId: job.id,
+        userUuid,
+        framework: job.framework,
+        columns,
+        entityMappings,
+        entityRows,
+        outputFormat: dto.outputFormat,
+        originalText: dto.text,
+        baseOrdinal,
+      });
+
+      const generatedAt = new Date().toISOString();
+
+      return {
+        generationId,
+        columns,
+        rows: entityRows,
+        summary: { totalRows: variantsCount, generatedAt, framework: job.framework },
+      };
+    } catch (error: unknown) {
+      if (error instanceof ForbiddenException || error instanceof BadRequestException) {
+        throw error;
+      }
+
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Synthetic table generation failed: ${message}`);
+      throw new InternalServerErrorException('Failed to generate synthetic data table');
+    }
+  }
+
+  public async downloadSyntheticArchive(
+    generationId: string,
+    userUuid: string,
+  ): Promise<GenerateSyntheticVariantsResult> {
+    const stored = this.syntheticGenerationStore.get(generationId);
+
+    if (!stored) {
+      throw new NotFoundException('Synthetic generation not found or expired');
+    }
+
+    if (stored.userUuid !== userUuid) {
+      throw new ForbiddenException('You do not have access to this synthetic generation');
+    }
+
+    try {
+      const variants = stored.entityRows.map((row) =>
+        DeIdService.buildDocumentFromEntityRow(
+          stored.originalText,
+          stored.entityMappings,
+          row.entities,
+        ),
+      );
+
+      const archiveBuffer = await DeIdService.buildSyntheticArchiveBuffer(
+        variants,
+        stored.outputFormat,
+      );
+      const filename = `synthetic-variants-${stored.jobId}-${Date.now()}${DE_ID_SYNTHETIC_CONFIG.ARCHIVE_EXTENSION}`;
+
+      return {
+        jobId: stored.jobId,
+        variantsGenerated: stored.entityRows.length,
+        outputFormat: stored.outputFormat,
+        mimeType: DE_ID_SYNTHETIC_CONFIG.ARCHIVE_MIME_TYPE,
+        filename,
+        archiveBuffer,
+      };
+    } catch (error: unknown) {
+      if (error instanceof ForbiddenException || error instanceof NotFoundException) {
+        throw error;
+      }
+
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Synthetic archive download failed: ${message}`);
+      throw new InternalServerErrorException('Failed to build synthetic archive');
+    }
+  }
+
+  public async regenerateSyntheticTable(
+    generationId: string,
+    dto: RegenerateSyntheticTableRequestDto,
+    userUuid: string,
+  ): Promise<GenerateSyntheticTableResult> {
+    const stored = this.syntheticGenerationStore.get(generationId);
+
+    if (!stored) {
+      throw new NotFoundException('Synthetic generation not found or expired');
+    }
+
+    if (stored.userUuid !== userUuid) {
+      throw new ForbiddenException('You do not have access to this synthetic generation');
+    }
+
+    try {
+      const configuredMaxVariants = this.getSyntheticMaxVariants();
+      const boundedCount = Math.min(dto.count, configuredMaxVariants);
+      const variantsCount = Math.max(boundedCount, SYNTHETIC_VARIANTS_MIN_COUNT);
+      const baseOrdinal =
+        stored.baseOrdinal + stored.entityRows.length + Math.floor(Math.random() * 9000) + 1000;
+
+      const entityRows = DeIdService.buildEntityRowsFromMappings(
+        stored.entityMappings,
+        variantsCount,
+        baseOrdinal,
+      );
+
+      const newGenerationId = this.syntheticGenerationStore.save({
+        jobId: stored.jobId,
+        userUuid,
+        framework: stored.framework,
+        columns: stored.columns,
+        entityMappings: stored.entityMappings,
+        entityRows,
+        outputFormat: dto.outputFormat,
+        originalText: stored.originalText,
+        baseOrdinal,
+      });
+
+      const generatedAt = new Date().toISOString();
+
+      return {
+        generationId: newGenerationId,
+        columns: stored.columns,
+        rows: entityRows,
+        summary: { totalRows: variantsCount, generatedAt, framework: stored.framework },
+      };
+    } catch (error: unknown) {
+      if (error instanceof ForbiddenException || error instanceof NotFoundException) {
+        throw error;
+      }
+
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Synthetic table regeneration failed: ${message}`);
+      throw new InternalServerErrorException('Failed to regenerate synthetic data table');
+    }
+  }
+
   private getSyntheticMaxVariants(): number {
     const configuredValue = this.configService.get<string>(SYNTHETIC_VARIANTS_ENV_KEY);
     const parsedValue = configuredValue ? Number.parseInt(configuredValue, 10) : Number.NaN;
@@ -973,6 +1211,101 @@ export default class DeIdService {
     }
 
     return DE_ID_SYNTHETIC_DEFAULTS.MAX_VARIANTS;
+  }
+
+  private static buildSyntheticEntityRows(
+    text: string,
+    framework: ComplianceFramework,
+    activeEntities: DetectedEntity[],
+    count: number,
+    baseOrdinal: number,
+  ): {
+    columns: string[];
+    entityMappings: EntityInstanceMapping[];
+    entityRows: SyntheticEntityRow[];
+  } {
+    const normalizedEntities = DeIdService.normalizeGdprPhoneLikeSpans(
+      framework,
+      text,
+      activeEntities,
+      (entity) => entity.category,
+      (entity, end) => ({ ...entity, end }),
+    );
+
+    const nonOverlapping = DeIdService.buildNonOverlappingPreviewSpans(
+      text,
+      normalizedEntities,
+    ).sort((a, b) => a.start - b.start);
+
+    const categoryCount = new Map<string, number>();
+    nonOverlapping.forEach((span) => {
+      categoryCount.set(span.category, (categoryCount.get(span.category) ?? 0) + 1);
+    });
+
+    const categoryIndex = new Map<string, number>();
+    const entityMappings: EntityInstanceMapping[] = nonOverlapping.map((span) => {
+      const total = categoryCount.get(span.category) ?? 1;
+      const idx = (categoryIndex.get(span.category) ?? 0) + 1;
+      categoryIndex.set(span.category, idx);
+      const instanceKey = total === 1 ? span.category : `${span.category}_${idx}`;
+      return {
+        instanceKey,
+        category: span.category,
+        start: span.start,
+        end: span.end,
+        originalValue: text.substring(span.start, span.end),
+      };
+    });
+
+    const columns = entityMappings.map((m) => m.instanceKey);
+
+    const entityRows = DeIdService.buildEntityRowsFromMappings(entityMappings, count, baseOrdinal);
+
+    return { columns, entityMappings, entityRows };
+  }
+
+  private static buildEntityRowsFromMappings(
+    entityMappings: EntityInstanceMapping[],
+    count: number,
+    baseOrdinal: number,
+  ): SyntheticEntityRow[] {
+    return Array.from({ length: count }, (_, index) => {
+      const variantOrdinal = baseOrdinal + index + 1;
+      const entities: Record<string, string> = {};
+      entityMappings.forEach((mapping) => {
+        entities[mapping.instanceKey] = DeIdService.buildSyntheticReplacement(
+          mapping.category,
+          mapping.originalValue,
+          variantOrdinal,
+          mapping.start,
+        );
+      });
+      return { variantNumber: index + 1, entities };
+    });
+  }
+
+  private static buildDocumentFromEntityRow(
+    originalText: string,
+    entityMappings: EntityInstanceMapping[],
+    entityValues: Record<string, string>,
+  ): string {
+    const spansDesc = [...entityMappings].sort((a, b) => b.start - a.start);
+
+    const result = spansDesc.reduce((text, mapping) => {
+      const syntheticValue = entityValues[mapping.instanceKey];
+      if (syntheticValue === undefined) {
+        return text;
+      }
+      const originalValue = originalText.substring(mapping.start, mapping.end);
+      const trailingWhitespace = originalValue.match(/\s+$/)?.[0] ?? '';
+      const valueWithSpacing =
+        trailingWhitespace && !/\s$/.test(syntheticValue)
+          ? `${syntheticValue}${trailingWhitespace}`
+          : syntheticValue;
+      return text.slice(0, mapping.start) + valueWithSpacing + text.slice(mapping.end);
+    }, originalText);
+
+    return normalizeAnonymizedText(result);
   }
 
   private static buildSyntheticTextVariant(
@@ -1215,7 +1548,10 @@ export default class DeIdService {
     }, []);
   }
 
-  private getPhiValidationOptions(framework?: ComplianceFramework): ValidationOptions {
+  private getPhiValidationOptions(
+    framework?: ComplianceFramework,
+    validationMode: PreviewValidationMode = PreviewValidationMode.STRICT,
+  ): ValidationOptions {
     const strictConfig = this.configService.get<string>(
       DE_ID_POST_VALIDATION_ENV.PHI_VALIDATION_STRICT,
     );
@@ -1226,11 +1562,27 @@ export default class DeIdService {
     const isGdprFramework =
       framework === ComplianceFramework.GDPR_EU || framework === ComplianceFramework.GDPR_UK;
 
+    const strictFromConfig = strictConfig ? strictConfig === 'true' : DEFAULT_PHI_VALIDATION_STRICT;
+    const strict = validationMode === PreviewValidationMode.WARN_ONLY ? false : strictFromConfig;
+
     return {
-      strict: strictConfig ? strictConfig === 'true' : DEFAULT_PHI_VALIDATION_STRICT,
+      strict,
       allowZip3: allowZip3Config ? allowZip3Config === 'true' : DEFAULT_PHI_VALIDATION_ALLOW_ZIP3,
       skipPatternTypes: isGdprFramework ? GDPR_PHI_SKIP_PATTERN_TYPES : undefined,
     };
+  }
+
+  private static buildLeakSummary(
+    leaks: Array<{ type: string }>,
+  ): PreviewPostValidationSummaryItem[] {
+    const leakCountByType = leaks.reduce<Record<string, number>>((acc, leak) => {
+      acc[leak.type] = (acc[leak.type] ?? 0) + 1;
+      return acc;
+    }, {});
+
+    return Object.entries(leakCountByType)
+      .map(([type, count]) => ({ type, count }))
+      .sort((first, second) => second.count - first.count || first.type.localeCompare(second.type));
   }
 
   public async getRemoteNlpHealth(): Promise<RemoteNlpHealthResult> {

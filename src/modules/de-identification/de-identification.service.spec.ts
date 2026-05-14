@@ -2,6 +2,8 @@ import {
   BadRequestException,
   ForbiddenException,
   InternalServerErrorException,
+  NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash } from 'node:crypto';
@@ -20,7 +22,8 @@ import DetectedEntity from '@common/db/entities/detected-entity.entity';
 import DeIdService from './de-identification.service';
 import PresidioClient from './presidio.client';
 import RemoteNlpClient from './remote-nlp.client';
-import { SyntheticOutputFormat } from './dto/request.dto';
+import SyntheticGenerationStore from './synthetic-generation.store';
+import { PreviewValidationMode, SyntheticOutputFormat } from './dto/request.dto';
 
 type AnalyzerFinding = {
   entity_type: string;
@@ -57,6 +60,11 @@ describe('DeIdService', () => {
   let configServiceMock: {
     get: jest.Mock;
   };
+  let syntheticGenerationStoreMock: {
+    save: jest.Mock;
+    get: jest.Mock;
+    delete: jest.Mock;
+  };
 
   const originalMaxChunkSize = DE_ID_CONFIG.MAX_CHUNK_SIZE;
   const originalChunkOverlap = DE_ID_CONFIG.CHUNK_OVERLAP;
@@ -88,11 +96,18 @@ describe('DeIdService', () => {
       get: jest.fn().mockReturnValue(undefined),
     };
 
+    syntheticGenerationStoreMock = {
+      save: jest.fn().mockReturnValue('gen-uuid-test'),
+      get: jest.fn().mockReturnValue(null),
+      delete: jest.fn(),
+    };
+
     service = new DeIdService(
       entityManagerMock as unknown as EntityManager,
       presidioClientMock as PresidioClientContract as unknown as PresidioClient,
       remoteNlpClientMock as RemoteNlpClientContract as unknown as RemoteNlpClient,
       configServiceMock as unknown as ConfigService,
+      syntheticGenerationStoreMock as unknown as SyntheticGenerationStore,
     );
   });
 
@@ -2593,6 +2608,62 @@ describe('DeIdService', () => {
     ).rejects.toThrow(BadRequestException);
   });
 
+  it('should return preview with leaks metadata in warn_only validation mode', async () => {
+    const text = 'Patient SSN 123-45-6789 ZIP 90210';
+    const hash = createHash('sha256').update(text).digest('hex');
+
+    entityManagerMock.findOne.mockResolvedValue({
+      id: 'job-preview-warn-only',
+      framework: ComplianceFramework.HIPAA,
+      sourceTextHash: hash,
+      sourceTextLength: text.length,
+    } satisfies Partial<DeIdJob>);
+
+    entityManagerMock.find.mockResolvedValue([] satisfies Partial<DetectedEntity>[]);
+
+    const result = await service.getPreviewWithValidation({
+      jobId: 'job-preview-warn-only',
+      text,
+      framework: ComplianceFramework.HIPAA,
+      activeIds: [],
+      validationMode: PreviewValidationMode.WARN_ONLY,
+    });
+
+    expect(result.anonymizedText).toBe(text);
+    expect(result.postValidation.valid).toBe(false);
+    expect(result.postValidation.mode).toBe(PreviewValidationMode.WARN_ONLY);
+    expect(result.postValidation.summary).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'SSN', count: 1 }),
+        expect.objectContaining({ type: 'ZIP', count: 1 }),
+      ]),
+    );
+  });
+
+  it('should keep strict preview behavior and return 422 on PHI leaks', async () => {
+    const text = 'Patient SSN 123-45-6789 ZIP 90210';
+    const hash = createHash('sha256').update(text).digest('hex');
+
+    entityManagerMock.findOne.mockResolvedValue({
+      id: 'job-preview-strict',
+      framework: ComplianceFramework.HIPAA,
+      sourceTextHash: hash,
+      sourceTextLength: text.length,
+    } satisfies Partial<DeIdJob>);
+
+    entityManagerMock.find.mockResolvedValue([] satisfies Partial<DetectedEntity>[]);
+
+    await expect(
+      service.getPreviewWithValidation({
+        jobId: 'job-preview-strict',
+        text,
+        framework: ComplianceFramework.HIPAA,
+        activeIds: [],
+        validationMode: PreviewValidationMode.STRICT,
+      }),
+    ).rejects.toThrow(UnprocessableEntityException);
+  });
+
   it('should apply hash operator in preview', async () => {
     const text = 'ABC12345';
     const hash = createHash('sha256').update(text).digest('hex');
@@ -3494,6 +3565,267 @@ describe('DeIdService', () => {
 
       // Low-confidence LOCATION without context should be filtered
       expect(result.findings.length).toBeLessThanOrEqual(1);
+    });
+  });
+
+  describe('generateSyntheticTable', () => {
+    it('should generate table rows and return generationId', async () => {
+      const sourceText = 'John Doe visited on 2025-02-14. Contact: +49 30 1234567';
+      const sourceTextHash = createHash('sha256').update(sourceText).digest('hex');
+
+      entityManagerMock.findOne.mockResolvedValue({
+        id: 'job-table',
+        userUuid: 'user-1',
+        framework: ComplianceFramework.GDPR_EU,
+        sourceTextHash,
+        sourceTextLength: sourceText.length,
+      } satisfies Partial<DeIdJob>);
+
+      entityManagerMock.find.mockResolvedValue([
+        {
+          id: 'entity-1',
+          jobId: 'job-table',
+          category: 'PERSON',
+          confidence: 95,
+          start: 0,
+          end: 8,
+          proxyType: 'Redact',
+          systemStatus: DetectedEntityStatus.ACTIVE,
+        },
+      ] satisfies Partial<DetectedEntity>[]);
+
+      const result = await service.generateSyntheticTable(
+        {
+          jobId: 'job-table',
+          text: sourceText,
+          count: 3,
+          outputFormat: SyntheticOutputFormat.TXT,
+        },
+        'user-1',
+      );
+
+      expect(result.generationId).toBe('gen-uuid-test');
+      expect(result.rows).toHaveLength(3);
+      expect(result.columns).toEqual(expect.any(Array));
+      expect(result.rows[0]).toMatchObject({
+        variantNumber: 1,
+        entities: expect.any(Object),
+      });
+      expect(result.summary.totalRows).toBe(3);
+      expect(result.summary.framework).toBe(ComplianceFramework.GDPR_EU);
+      expect(syntheticGenerationStoreMock.save).toHaveBeenCalledTimes(1);
+    });
+
+    it('should reject generateSyntheticTable for foreign job', async () => {
+      entityManagerMock.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.generateSyntheticTable(
+          {
+            jobId: 'job-foreign',
+            text: 'irrelevant text',
+            count: 3,
+            outputFormat: SyntheticOutputFormat.TXT,
+          },
+          'user-1',
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('should reject generateSyntheticTable when text hash mismatches', async () => {
+      entityManagerMock.findOne.mockResolvedValue({
+        id: 'job-mismatch',
+        userUuid: 'user-1',
+        framework: ComplianceFramework.GDPR_EU,
+        sourceTextHash: createHash('sha256').update('different text').digest('hex'),
+        sourceTextLength: 'different text'.length,
+      } satisfies Partial<DeIdJob>);
+
+      await expect(
+        service.generateSyntheticTable(
+          {
+            jobId: 'job-mismatch',
+            text: 'original text',
+            count: 2,
+            outputFormat: SyntheticOutputFormat.TXT,
+          },
+          'user-1',
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should reject generateSyntheticTable when no active entities', async () => {
+      const sourceText = 'no pii here';
+      const sourceTextHash = createHash('sha256').update(sourceText).digest('hex');
+
+      entityManagerMock.findOne.mockResolvedValue({
+        id: 'job-inactive',
+        userUuid: 'user-1',
+        framework: ComplianceFramework.GDPR_EU,
+        sourceTextHash,
+        sourceTextLength: sourceText.length,
+      } satisfies Partial<DeIdJob>);
+
+      entityManagerMock.find.mockResolvedValue([
+        {
+          id: 'entity-1',
+          jobId: 'job-inactive',
+          category: 'PERSON',
+          systemStatus: DetectedEntityStatus.INACTIVE,
+        },
+      ] satisfies Partial<DetectedEntity>[]);
+
+      await expect(
+        service.generateSyntheticTable(
+          {
+            jobId: 'job-inactive',
+            text: sourceText,
+            count: 3,
+            outputFormat: SyntheticOutputFormat.TXT,
+          },
+          'user-1',
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('downloadSyntheticArchive', () => {
+    it('should build and return archive buffer for valid generationId', async () => {
+      const entityRows = [
+        { variantNumber: 1, entities: { PERSON: 'Synthetic Name 1' } },
+        { variantNumber: 2, entities: { PERSON: 'Synthetic Name 2' } },
+      ];
+      const entityMappings = [
+        { instanceKey: 'PERSON', category: 'PERSON', start: 0, end: 8, originalValue: 'original' },
+      ];
+
+      syntheticGenerationStoreMock.get.mockReturnValue({
+        jobId: 'job-dl',
+        userUuid: 'user-1',
+        framework: ComplianceFramework.GDPR_EU,
+        columns: ['PERSON'],
+        entityMappings,
+        entityRows,
+        outputFormat: SyntheticOutputFormat.TXT,
+        originalText: 'original text',
+        baseOrdinal: 0,
+        generatedAt: new Date(),
+        expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+      });
+
+      const result = await service.downloadSyntheticArchive('gen-uuid-test', 'user-1');
+
+      expect(result.jobId).toBe('job-dl');
+      expect(result.variantsGenerated).toBe(2);
+      expect(result.mimeType).toBe('application/zip');
+      expect(result.archiveBuffer.subarray(0, 2).toString()).toBe('PK');
+    });
+
+    it('should throw NotFoundException for unknown generationId', async () => {
+      syntheticGenerationStoreMock.get.mockReturnValue(null);
+
+      await expect(service.downloadSyntheticArchive('unknown-id', 'user-1')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('should throw ForbiddenException when generationId belongs to another user', async () => {
+      syntheticGenerationStoreMock.get.mockReturnValue({
+        jobId: 'job-dl',
+        userUuid: 'other-user',
+        columns: ['PERSON'],
+        entityMappings: [],
+        entityRows: [{ variantNumber: 1, entities: { PERSON: 'Synthetic' } }],
+        outputFormat: SyntheticOutputFormat.TXT,
+        originalText: 'original',
+        baseOrdinal: 0,
+        generatedAt: new Date(),
+        expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+      });
+
+      await expect(service.downloadSyntheticArchive('gen-uuid-test', 'user-1')).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
+  });
+
+  describe('regenerateSyntheticTable', () => {
+    it('should produce a new generationId with new rows', async () => {
+      syntheticGenerationStoreMock.get.mockReturnValue({
+        jobId: 'job-regen',
+        userUuid: 'user-1',
+        framework: ComplianceFramework.GDPR_EU,
+        columns: ['PERSON'],
+        entityMappings: [
+          {
+            instanceKey: 'PERSON',
+            category: 'PERSON',
+            start: 0,
+            end: 8,
+            originalValue: 'John Doe',
+          },
+        ],
+        entityRows: [
+          { variantNumber: 1, entities: { PERSON: 'Old Name One' } },
+          { variantNumber: 2, entities: { PERSON: 'Old Name Two' } },
+        ],
+        outputFormat: SyntheticOutputFormat.TXT,
+        originalText: 'John Doe visited on 2025-02-14',
+        baseOrdinal: 0,
+        generatedAt: new Date(),
+        expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+      });
+
+      syntheticGenerationStoreMock.save.mockReturnValue('gen-uuid-regen');
+
+      const result = await service.regenerateSyntheticTable(
+        'gen-uuid-old',
+        { count: 2, outputFormat: SyntheticOutputFormat.TXT },
+        'user-1',
+      );
+
+      expect(result.generationId).toBe('gen-uuid-regen');
+      expect(result.rows).toHaveLength(2);
+      expect(result.rows[0].variantNumber).toBe(1);
+      expect(result.rows[0].entities).toEqual(expect.any(Object));
+      expect(result.columns).toEqual(expect.any(Array));
+      expect(result.summary.totalRows).toBe(2);
+    });
+
+    it('should throw NotFoundException when generationId does not exist', async () => {
+      syntheticGenerationStoreMock.get.mockReturnValue(null);
+
+      await expect(
+        service.regenerateSyntheticTable(
+          'missing-id',
+          { count: 3, outputFormat: SyntheticOutputFormat.TXT },
+          'user-1',
+        ),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('should throw ForbiddenException when generationId belongs to another user', async () => {
+      syntheticGenerationStoreMock.get.mockReturnValue({
+        jobId: 'job-regen',
+        userUuid: 'other-user',
+        framework: ComplianceFramework.GDPR_EU,
+        columns: ['PERSON'],
+        entityMappings: [],
+        entityRows: [{ variantNumber: 1, entities: { PERSON: 'Synthetic' } }],
+        outputFormat: SyntheticOutputFormat.TXT,
+        originalText: 'original',
+        baseOrdinal: 0,
+        generatedAt: new Date(),
+        expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+      });
+
+      await expect(
+        service.regenerateSyntheticTable(
+          'gen-uuid-test',
+          { count: 2, outputFormat: SyntheticOutputFormat.TXT },
+          'user-1',
+        ),
+      ).rejects.toThrow(ForbiddenException);
     });
   });
 });

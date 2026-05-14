@@ -5,7 +5,7 @@ import {
   DetectedEntitySystemReason,
   DetectedEntityUserReason,
 } from '@common/constants/compliance.constants';
-import { SyntheticOutputFormat } from './request.dto';
+import { PreviewValidationMode, SyntheticOutputFormat } from './request.dto';
 
 export class DetectedEntityResponseDto {
   @ApiProperty({ example: '550e8400-e29b-41d4-a716-446655440000' })
@@ -62,9 +62,48 @@ export class AnalyzeResponseDto {
   readonly findings!: DetectedEntityResponseDto[];
 }
 
+export class PreviewPostValidationLeakDto {
+  @ApiProperty({
+    example: 'SSN',
+    description: 'Matched PHI pattern type from post-validation engine',
+  })
+  readonly type!: string;
+
+  @ApiProperty({ example: '123-45-6789' })
+  readonly match!: string;
+
+  @ApiProperty({ example: 15 })
+  readonly index!: number;
+}
+
+export class PreviewPostValidationSummaryItemDto {
+  @ApiProperty({ example: 'SSN' })
+  readonly type!: string;
+
+  @ApiProperty({ example: 2 })
+  readonly count!: number;
+}
+
+export class PreviewPostValidationDto {
+  @ApiProperty({ example: false })
+  readonly valid!: boolean;
+
+  @ApiProperty({ enum: PreviewValidationMode, example: PreviewValidationMode.WARN_ONLY })
+  readonly mode!: PreviewValidationMode;
+
+  @ApiProperty({ type: [PreviewPostValidationLeakDto] })
+  readonly leaks!: PreviewPostValidationLeakDto[];
+
+  @ApiProperty({ type: [PreviewPostValidationSummaryItemDto] })
+  readonly summary!: PreviewPostValidationSummaryItemDto[];
+}
+
 export class PreviewResponseDto {
   @ApiProperty({ example: '[PERSON_1] was born on [DATE_SHIFTED_1].' })
   readonly anonymizedText!: string;
+
+  @ApiProperty({ type: () => PreviewPostValidationDto })
+  readonly postValidation!: PreviewPostValidationDto;
 }
 
 export class BulkUpdateEntityStatusesResponseDto {
@@ -113,4 +152,65 @@ export class RemoteNlpHealthResponseDto {
 
   @ApiProperty({ example: 'ok' })
   readonly details!: string;
+}
+
+export class SyntheticGenerationRowDto {
+  @ApiProperty({ example: 1, description: 'One-based variant index' })
+  readonly variantNumber!: number;
+
+  @ApiProperty({
+    example: {
+      PERSON: 'Michael Garcia',
+      'DATE & TIME': '17.03.2026',
+      AGE: '47',
+      PHONE: '555-55-555',
+    },
+    description: 'Map of entity category to synthetic replacement value for this row',
+  })
+  readonly entities!: Record<string, string>;
+}
+
+export class SyntheticTableSummaryDto {
+  @ApiProperty({ example: 5 })
+  readonly totalRows!: number;
+
+  @ApiProperty({ example: '2026-05-14T10:00:00.000Z' })
+  readonly generatedAt!: string;
+
+  @ApiProperty({ example: 'GDPR_EU' })
+  readonly framework!: string;
+}
+
+export class GenerateSyntheticTableResponseDto {
+  @ApiProperty({ example: '550e8400-e29b-41d4-a716-446655440099' })
+  readonly generationId!: string;
+
+  @ApiProperty({
+    example: ['PERSON', 'DATE & TIME', 'AGE', 'PHONE', 'EMAIL', 'MRN'],
+    description: 'Ordered list of entity category column headers for the table',
+  })
+  readonly columns!: string[];
+
+  @ApiProperty({ type: [SyntheticGenerationRowDto] })
+  readonly rows!: SyntheticGenerationRowDto[];
+
+  @ApiProperty({ type: () => SyntheticTableSummaryDto })
+  readonly summary!: SyntheticTableSummaryDto;
+}
+
+export class RegenerateSyntheticTableResponseDto {
+  @ApiProperty({ example: '550e8400-e29b-41d4-a716-446655440100' })
+  readonly generationId!: string;
+
+  @ApiProperty({
+    example: ['PERSON', 'DATE & TIME', 'AGE', 'PHONE', 'EMAIL', 'MRN'],
+    description: 'Ordered list of entity category column headers for the table',
+  })
+  readonly columns!: string[];
+
+  @ApiProperty({ type: [SyntheticGenerationRowDto] })
+  readonly rows!: SyntheticGenerationRowDto[];
+
+  @ApiProperty({ type: () => SyntheticTableSummaryDto })
+  readonly summary!: SyntheticTableSummaryDto;
 }

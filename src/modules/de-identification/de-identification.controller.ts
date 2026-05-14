@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Param,
   Patch,
   Post,
   Query,
@@ -16,13 +17,16 @@ import DeIdService from './de-identification.service';
 import {
   AnalyzeRequestDto,
   BulkUpdateEntityStatusesRequestDto,
-  GenerateSyntheticVariantsRequestDto,
+  GenerateSyntheticTableRequestDto,
   PreviewRequestDto,
+  RegenerateSyntheticTableRequestDto,
 } from './dto/request.dto';
 import {
   AnalyzeResponseDto,
   BulkUpdateEntityStatusesResponseDto,
+  GenerateSyntheticTableResponseDto,
   PreviewResponseDto,
+  RegenerateSyntheticTableResponseDto,
   RemoteNlpHealthResponseDto,
 } from './dto/response.dto';
 import { DeIdStatsQueryDto } from './dto/stats-query.dto';
@@ -56,8 +60,7 @@ export default class DeIdController {
     @Body() dto: PreviewRequestDto,
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<PreviewResponseDto> {
-    const text = await this.deIdService.getPreview(dto, user.uuid);
-    return { anonymizedText: text };
+    return this.deIdService.getPreviewWithValidation(dto, user.uuid);
   }
 
   @Patch('entities/statuses')
@@ -70,26 +73,44 @@ export default class DeIdController {
     return this.deIdService.bulkUpdateEntityStatuses(dto, user.uuid);
   }
 
-  @Post('synthetic')
-  @ApiOperation({ summary: 'Generate N synthetic variants of de-identified text' })
+  @Post('synthetic/generate')
+  @ApiOperation({ summary: 'Generate synthetic data table (no archive download)' })
+  @ApiOkResponse({ type: GenerateSyntheticTableResponseDto })
+  async generateSyntheticTable(
+    @Body() dto: GenerateSyntheticTableRequestDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<GenerateSyntheticTableResponseDto> {
+    return this.deIdService.generateSyntheticTable(dto, user.uuid);
+  }
+
+  @Get('synthetic/:generationId/download')
+  @ApiOperation({ summary: 'Download ZIP archive for a generated synthetic dataset' })
   @ApiProduces('application/zip')
   @ApiOkResponse({
-    description: 'ZIP archive with synthetic variants',
-    schema: {
-      type: 'string',
-      format: 'binary',
-    },
+    description: 'ZIP archive for the specified generationId',
+    schema: { type: 'string', format: 'binary' },
   })
-  async generateSyntheticVariants(
-    @Body() dto: GenerateSyntheticVariantsRequestDto,
+  async downloadSyntheticArchive(
+    @Param('generationId') generationId: string,
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<StreamableFile> {
-    const result = await this.deIdService.generateSyntheticVariants(dto, user.uuid);
+    const result = await this.deIdService.downloadSyntheticArchive(generationId, user.uuid);
 
     return new StreamableFile(result.archiveBuffer, {
       type: result.mimeType,
       disposition: `attachment; filename="${result.filename}"`,
     });
+  }
+
+  @Post('synthetic/:generationId/regenerate')
+  @ApiOperation({ summary: 'Regenerate synthetic data table for an existing generation' })
+  @ApiOkResponse({ type: RegenerateSyntheticTableResponseDto })
+  async regenerateSyntheticTable(
+    @Param('generationId') generationId: string,
+    @Body() dto: RegenerateSyntheticTableRequestDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<RegenerateSyntheticTableResponseDto> {
+    return this.deIdService.regenerateSyntheticTable(generationId, dto, user.uuid);
   }
 
   @Get('remote-nlp/health')
