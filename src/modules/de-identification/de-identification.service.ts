@@ -259,6 +259,15 @@ const SYNTHETIC_VARIANTS_MIN_COUNT = 1;
 const SYNTHETIC_DOC_BASE_FILENAME = 'variant';
 const ZIP_GENERATE_TYPE_NODEBUFFER = 'nodebuffer' as const;
 const ZIP_COMPRESSION_DEFLATE = 'DEFLATE' as const;
+const SYNTHETIC_PDF_CHARACTER_REPLACEMENTS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/\u00A0/gu, ' '],
+  [/[\u2012\u2013\u2014\u2212]/gu, '-'],
+  [/[\u2018\u2019]/gu, "'"],
+  [/[\u201C\u201D]/gu, '"'],
+  [/[\u2022\u25CF]/gu, '-'],
+  [/\u2026/gu, '...'],
+] as const;
+const SYNTHETIC_PDF_COMBINING_MARKS_PATTERN = /[\u0300-\u036f]/gu;
 const SYNTHETIC_PDF_LAYOUT = {
   PAGE_WIDTH: 595,
   PAGE_HEIGHT: 842,
@@ -1488,13 +1497,17 @@ export default class DeIdService {
   private static async renderSyntheticPdfBuffer(text: string): Promise<Buffer> {
     const pdfDocument = await PDFDocument.create();
     const font = await pdfDocument.embedFont(StandardFonts.Helvetica);
+    const sanitizedText = DeIdService.sanitizeTextForStandardPdfFont(text);
 
     let page = pdfDocument.addPage([
       SYNTHETIC_PDF_LAYOUT.PAGE_WIDTH,
       SYNTHETIC_PDF_LAYOUT.PAGE_HEIGHT,
     ]);
     let cursorY = SYNTHETIC_PDF_LAYOUT.PAGE_HEIGHT - SYNTHETIC_PDF_LAYOUT.MARGIN;
-    const textLines = DeIdService.wrapTextForPdf(text, SYNTHETIC_PDF_LAYOUT.MAX_LINE_LENGTH);
+    const textLines = DeIdService.wrapTextForPdf(
+      sanitizedText,
+      SYNTHETIC_PDF_LAYOUT.MAX_LINE_LENGTH,
+    );
 
     textLines.forEach((line) => {
       if (cursorY <= SYNTHETIC_PDF_LAYOUT.MARGIN) {
@@ -1517,6 +1530,33 @@ export default class DeIdService {
 
     const pdfBytes = await pdfDocument.save();
     return Buffer.from(pdfBytes);
+  }
+
+  private static sanitizeTextForStandardPdfFont(text: string): string {
+    const normalizedText = text
+      .normalize('NFKD')
+      .replace(SYNTHETIC_PDF_COMBINING_MARKS_PATTERN, '');
+
+    const replacedText = SYNTHETIC_PDF_CHARACTER_REPLACEMENTS.reduce(
+      (resultText, [pattern, replacement]) => resultText.replace(pattern, replacement),
+      normalizedText,
+    );
+
+    return Array.from(replacedText)
+      .map((character) => {
+        const codePoint = character.codePointAt(0);
+
+        if (codePoint === undefined) {
+          return '?';
+        }
+
+        const isPrintableAscii = codePoint >= 32 && codePoint <= 126;
+        const isAllowedWhitespace =
+          codePoint === 9 || codePoint === 10 || codePoint === 13;
+
+        return isPrintableAscii || isAllowedWhitespace ? character : '?';
+      })
+      .join('');
   }
 
   private static wrapTextForPdf(text: string, maxLineLength: number): string[] {

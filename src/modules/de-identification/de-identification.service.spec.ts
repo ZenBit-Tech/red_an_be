@@ -3747,6 +3747,27 @@ describe('DeIdService', () => {
         ForbiddenException,
       );
     });
+
+    it('should build pdf archive when text contains unicode bullet separators', async () => {
+      syntheticGenerationStoreMock.get.mockReturnValue({
+        jobId: 'job-pdf',
+        userUuid: 'user-1',
+        framework: ComplianceFramework.GDPR_EU,
+        columns: [],
+        entityMappings: [],
+        entityRows: [{ variantNumber: 1, entities: {} }],
+        outputFormat: SyntheticOutputFormat.PDF,
+        originalText: 'Phone +1 212 5551234 ● Email patient@example.com',
+        baseOrdinal: 0,
+        generatedAt: new Date(),
+        expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+      });
+
+      const result = await service.downloadSyntheticArchive('gen-uuid-pdf', 'user-1');
+
+      expect(result.outputFormat).toBe(SyntheticOutputFormat.PDF);
+      expect(result.archiveBuffer.subarray(0, 2).toString()).toBe('PK');
+    });
   });
 
   describe('regenerateSyntheticTable', () => {
