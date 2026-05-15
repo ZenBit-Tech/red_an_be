@@ -89,12 +89,12 @@ Success response:
 }
 ```
 
-### Generate synthetic variants (ZIP download)
+### Generate synthetic data table
 
 Endpoint:
 
 ```http
-POST /de-identification/synthetic
+POST /de-identification/synthetic/generate
 Content-Type: application/json
 Authorization: Bearer <jwt-token>
 ```
@@ -115,17 +115,72 @@ Supported `outputFormat` values:
 - `txt`
 - `pdf`
 
-Response:
+Success response:
 
-- `200 OK`
-- `Content-Type: application/zip`
-- `Content-Disposition: attachment; filename="synthetic-variants-<jobId>-<timestamp>.zip"`
-- Binary ZIP payload.
+```json
+{
+  "generationId": "550e8400-e29b-41d4-a716-446655440099",
+  "columns": ["PERSON", "DATE & TIME", "AGE", "PHONE", "EMAIL"],
+  "rows": [
+    {
+      "rowIndex": 1,
+      "entities": {
+        "PERSON": "Jane Smith",
+        "AGE": "47",
+        "PHONE": "555-55-555"
+      }
+    }
+  ],
+  "summary": {
+    "totalRows": 5,
+    "generatedAt": "2026-05-14T10:00:00.000Z",
+    "framework": "GDPR_EU"
+  }
+}
+```
 
 Important behavior:
 
 - `text` must match the original analyzed document for the `jobId` (hash + length validation).
 - Only entities with persisted `effectiveStatus=ACTIVE` are used for synthetic generation.
+- The returned `generationId` is required for the download and regenerate endpoints.
+
+### Download synthetic archive (ZIP)
+
+Endpoint:
+
+```http
+GET /de-identification/synthetic/:generationId/download
+Authorization: Bearer <jwt-token>
+```
+
+Response:
+
+- `200 OK`
+- `Content-Type: application/zip`
+- `Content-Disposition: attachment; filename="synthetic-variants-<generationId>-<timestamp>.zip"`
+- Binary ZIP payload.
+
+### Regenerate synthetic data table
+
+Endpoint:
+
+```http
+POST /de-identification/synthetic/:generationId/regenerate
+Content-Type: application/json
+Authorization: Bearer <jwt-token>
+```
+
+Request body:
+
+```json
+{
+  "count": 5,
+  "outputFormat": "txt"
+}
+```
+
+Success response: same shape as **Generate synthetic data table** (`generationId`, `columns`, `rows`, `summary`).
 
 ### 2) Verify magic link and get access token
 
