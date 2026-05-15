@@ -1551,8 +1551,7 @@ export default class DeIdService {
         }
 
         const isPrintableAscii = codePoint >= 32 && codePoint <= 126;
-        const isAllowedWhitespace =
-          codePoint === 9 || codePoint === 10 || codePoint === 13;
+        const isAllowedWhitespace = codePoint === 9 || codePoint === 10 || codePoint === 13;
 
         return isPrintableAscii || isAllowedWhitespace ? character : '?';
       })
