@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ArrayUnique,
   IsString,
   IsEnum,
   IsNumber,
@@ -11,7 +12,17 @@ import {
   IsArray,
   IsUUID,
 } from 'class-validator';
-import { ComplianceFramework } from '@common/constants/compliance.constants';
+import { ComplianceFramework, DetectedEntityStatus } from '@common/constants/compliance.constants';
+
+export enum SyntheticOutputFormat {
+  TXT = 'txt',
+  PDF = 'pdf',
+}
+
+export enum PreviewValidationMode {
+  STRICT = 'strict',
+  WARN_ONLY = 'warn_only',
+}
 
 export class AnalyzeRequestDto {
   @ApiProperty({ example: 'Patient John Doe, born 1980-05-15...' })
@@ -64,4 +75,123 @@ export class PreviewRequestDto {
   @IsArray()
   @IsUUID('4', { each: true })
   readonly activeIds!: string[];
+
+  @ApiPropertyOptional({
+    enum: PreviewValidationMode,
+    example: PreviewValidationMode.WARN_ONLY,
+    description:
+      'Post-validation behavior for preview response. strict returns 422 on PHI leaks, warn_only returns 200 with leak metadata.',
+  })
+  @IsOptional()
+  @IsEnum(PreviewValidationMode)
+  readonly validationMode?: PreviewValidationMode;
+}
+
+export class BulkUpdateEntityStatusesRequestDto {
+  @ApiProperty({ example: '550e8400-e29b-41d4-a716-446655440000' })
+  @IsUUID('4')
+  readonly jobId!: string;
+
+  @ApiProperty({
+    description:
+      'Entity UUIDs that should be marked as active. All remaining job entities become inactive.',
+    example: ['550e8400-e29b-41d4-a716-446655440010', '550e8400-e29b-41d4-a716-446655440011'],
+  })
+  @IsArray()
+  @ArrayUnique()
+  @IsUUID('4', { each: true })
+  readonly activeEntityIds!: string[];
+}
+
+export class ResetEntityStatusRequestDto {
+  @ApiProperty({ example: '550e8400-e29b-41d4-a716-446655440010' })
+  @IsUUID('4')
+  readonly entityId!: string;
+
+  @ApiProperty({ enum: DetectedEntityStatus, example: DetectedEntityStatus.ACTIVE })
+  @IsEnum(DetectedEntityStatus)
+  readonly fallbackStatus!: DetectedEntityStatus;
+}
+
+export class GenerateSyntheticVariantsRequestDto {
+  @ApiProperty({ example: '550e8400-e29b-41d4-a716-446655440000' })
+  @IsUUID('4')
+  readonly jobId!: string;
+
+  @ApiProperty({
+    example: 'Patient John Doe visited on 2026-01-10. Contact: +49 30 1234567',
+    description:
+      'Original analyzed text. Used to generate synthetic variants after hash/length validation.',
+  })
+  @IsString()
+  @IsNotEmpty()
+  readonly text!: string;
+
+  @ApiProperty({
+    example: 5,
+    description: 'Number of synthetic variants to generate. Max limit from environment config.',
+  })
+  @IsNumber()
+  @Min(1)
+  @Max(20)
+  readonly count!: number;
+
+  @ApiProperty({
+    enum: SyntheticOutputFormat,
+    example: SyntheticOutputFormat.TXT,
+    description: 'Output file format: txt or pdf',
+  })
+  @IsEnum(SyntheticOutputFormat)
+  readonly outputFormat!: SyntheticOutputFormat;
+}
+
+export class GenerateSyntheticTableRequestDto {
+  @ApiProperty({ example: '550e8400-e29b-41d4-a716-446655440000' })
+  @IsUUID('4')
+  readonly jobId!: string;
+
+  @ApiProperty({
+    example: 'Patient John Doe visited on 2026-01-10. Contact: +49 30 1234567',
+    description:
+      'Original analyzed text. Used to generate synthetic rows after hash/length validation.',
+  })
+  @IsString()
+  @IsNotEmpty()
+  readonly text!: string;
+
+  @ApiProperty({
+    example: 5,
+    description: 'Number of synthetic rows to generate. Max limit from environment config.',
+  })
+  @IsNumber()
+  @Min(1)
+  @Max(20)
+  readonly count!: number;
+
+  @ApiProperty({
+    enum: SyntheticOutputFormat,
+    example: SyntheticOutputFormat.TXT,
+    description: 'Output file format used when downloading the archive.',
+  })
+  @IsEnum(SyntheticOutputFormat)
+  readonly outputFormat!: SyntheticOutputFormat;
+}
+
+export class RegenerateSyntheticTableRequestDto {
+  @ApiProperty({
+    example: 5,
+    description: 'Number of synthetic rows to regenerate.',
+  })
+  @IsNumber()
+  @Min(1)
+  @Max(20)
+  readonly count!: number;
+
+  @ApiProperty({
+    enum: SyntheticOutputFormat,
+    example: SyntheticOutputFormat.TXT,
+    description: 'Output file format used when downloading the archive.',
+  })
+  @IsEnum(SyntheticOutputFormat)
+  readonly outputFormat!: SyntheticOutputFormat;
 }

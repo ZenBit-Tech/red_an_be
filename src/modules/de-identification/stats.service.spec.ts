@@ -1,4 +1,5 @@
 import { EntityManager } from 'typeorm';
+import { DetectedEntityStatus } from '@common/constants/compliance.constants';
 
 import { DeIdStatsPeriod } from './de-identification.constants';
 import { DeIdStatsQueryDto } from './dto/stats-query.dto';
@@ -76,6 +77,15 @@ describe('StatsService', () => {
     const result = await service.getDashboardData(TEST_USER_UUID, query);
 
     expect(entityManagerMock.query).toHaveBeenCalledTimes(12);
+    const entityQueryCalls = entityManagerMock.query.mock.calls.filter(([sql]) =>
+      String(sql).includes('FROM detected_entities de'),
+    );
+    expect(entityQueryCalls).toHaveLength(6);
+    entityQueryCalls.forEach(([sql, params]) => {
+      expect(String(sql)).toContain('COALESCE(de.userStatus, de.systemStatus) = ?');
+      expect((params as unknown[]).at(-1)).toBe(DetectedEntityStatus.ACTIVE);
+    });
+
     expect(result.meta).toEqual({
       period: DeIdStatsPeriod.LAST_7_DAYS,
       timezone: 'Europe/Kyiv',

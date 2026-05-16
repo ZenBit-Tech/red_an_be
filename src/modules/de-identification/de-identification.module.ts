@@ -7,12 +7,13 @@ import DeIdService from './de-identification.service';
 import StatsService from './stats.service';
 import PresidioClient from './presidio.client';
 import RemoteNlpClient from './remote-nlp.client';
+import SyntheticGenerationStore from './synthetic-generation.store';
 import AuthModule from '../auth/auth.module';
 
 @Module({
   imports: [TypeOrmModule.forFeature([DeIdJob, DetectedEntity]), AuthModule],
   controllers: [DeIdController],
-  providers: [DeIdService, StatsService, PresidioClient, RemoteNlpClient],
+  providers: [DeIdService, StatsService, PresidioClient, RemoteNlpClient, SyntheticGenerationStore],
   exports: [DeIdService],
 })
 export default class DeIdModule {}

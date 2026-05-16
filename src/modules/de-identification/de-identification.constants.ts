@@ -32,6 +32,24 @@ export const DE_ID_STATS_CONFIDENCE_BUCKETS = {
   UNDER_SIXTY: '<60%',
 };
 
+export const DE_ID_SYNTHETIC_DEFAULTS = {
+  MAX_VARIANTS: 20,
+};
+
+export const DE_ID_SYNTHETIC_GENERATION_STORE = {
+  TTL_MS: 30 * 60 * 1000,
+};
+
+export const DE_ID_SYNTHETIC_CONFIG = {
+  DEFAULT_VARIANTS_COUNT: 3,
+  OUTPUT_FILE_EXTENSION_TXT: '.txt',
+  OUTPUT_FILE_EXTENSION_PDF: '.pdf',
+  ARCHIVE_EXTENSION: '.zip',
+  ARCHIVE_MIME_TYPE: 'application/zip',
+  TEXT_MIME_TYPE: 'text/plain',
+  PDF_MIME_TYPE: 'application/pdf',
+};
+
 export const DE_ID_STATS_METHOD_LABELS = {
   UNKNOWN: 'Unknown',
 };

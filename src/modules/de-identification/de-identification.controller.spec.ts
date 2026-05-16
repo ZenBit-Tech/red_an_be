@@ -1,11 +1,29 @@
+import { StreamableFile } from '@nestjs/common';
 import DeIdController from './de-identification.controller';
 import { DeIdStatsPeriod } from './de-identification.constants';
 import DeIdService from './de-identification.service';
-import { AnalyzeRequestDto, PreviewRequestDto } from './dto/request.dto';
+import {
+  AnalyzeRequestDto,
+  BulkUpdateEntityStatusesRequestDto,
+  GenerateSyntheticTableRequestDto,
+  PreviewRequestDto,
+  PreviewValidationMode,
+  RegenerateSyntheticTableRequestDto,
+  SyntheticOutputFormat,
+} from './dto/request.dto';
 import { DeIdStatsQueryDto } from './dto/stats-query.dto';
 import StatsService from './stats.service';
 
-type DeIdServiceContract = Pick<DeIdService, 'analyzeText' | 'getPreview' | 'getRemoteNlpHealth'>;
+type DeIdServiceContract = Pick<
+  DeIdService,
+  | 'analyzeText'
+  | 'bulkUpdateEntityStatuses'
+  | 'downloadSyntheticArchive'
+  | 'generateSyntheticTable'
+  | 'getPreviewWithValidation'
+  | 'getRemoteNlpHealth'
+  | 'regenerateSyntheticTable'
+>;
 type StatsServiceContract = Pick<StatsService, 'getDashboardData'>;
 const TEST_USER = {
   uuid: 'user-uuid-1',
@@ -16,8 +34,12 @@ describe('DeIdController', () => {
   let controller: DeIdController;
   let deIdServiceMock: {
     analyzeText: jest.Mock;
-    getPreview: jest.Mock;
+    bulkUpdateEntityStatuses: jest.Mock;
+    downloadSyntheticArchive: jest.Mock;
+    generateSyntheticTable: jest.Mock;
+    getPreviewWithValidation: jest.Mock;
     getRemoteNlpHealth: jest.Mock;
+    regenerateSyntheticTable: jest.Mock;
   };
   let statsServiceMock: {
     getDashboardData: jest.Mock;
@@ -26,8 +48,12 @@ describe('DeIdController', () => {
   beforeEach(() => {
     deIdServiceMock = {
       analyzeText: jest.fn(),
-      getPreview: jest.fn(),
+      bulkUpdateEntityStatuses: jest.fn(),
+      downloadSyntheticArchive: jest.fn(),
+      generateSyntheticTable: jest.fn(),
+      getPreviewWithValidation: jest.fn(),
       getRemoteNlpHealth: jest.fn(),
+      regenerateSyntheticTable: jest.fn(),
     };
 
     statsServiceMock = {
@@ -71,15 +97,55 @@ describe('DeIdController', () => {
       text: 'John Doe',
       framework: 'GDPR_EU' as PreviewRequestDto['framework'],
       activeIds: [],
+      validationMode: PreviewValidationMode.WARN_ONLY,
     };
 
-    deIdServiceMock.getPreview.mockResolvedValue('[REDACT] Doe');
+    deIdServiceMock.getPreviewWithValidation.mockResolvedValue({
+      anonymizedText: '[REDACT] Doe',
+      postValidation: {
+        valid: true,
+        mode: PreviewValidationMode.WARN_ONLY,
+        leaks: [],
+        summary: [],
+      },
+    });
 
     const result = await controller.preview(dto, TEST_USER);
 
-    expect(deIdServiceMock.getPreview).toHaveBeenCalledTimes(1);
-    expect(deIdServiceMock.getPreview).toHaveBeenCalledWith(dto, TEST_USER.uuid);
-    expect(result).toEqual({ anonymizedText: '[REDACT] Doe' });
+    expect(deIdServiceMock.getPreviewWithValidation).toHaveBeenCalledTimes(1);
+    expect(deIdServiceMock.getPreviewWithValidation).toHaveBeenCalledWith(dto, TEST_USER.uuid);
+    expect(result).toEqual({
+      anonymizedText: '[REDACT] Doe',
+      postValidation: {
+        valid: true,
+        mode: PreviewValidationMode.WARN_ONLY,
+        leaks: [],
+        summary: [],
+      },
+    });
+  });
+
+  it('should call service bulkUpdateEntityStatuses', async () => {
+    const dto: BulkUpdateEntityStatusesRequestDto = {
+      jobId: 'job-1',
+      activeEntityIds: ['entity-1', 'entity-2'],
+    };
+
+    deIdServiceMock.bulkUpdateEntityStatuses.mockResolvedValue({
+      jobId: 'job-1',
+      updatedCount: 2,
+      findings: [],
+    });
+
+    const result = await controller.bulkUpdateEntityStatuses(dto, TEST_USER);
+
+    expect(deIdServiceMock.bulkUpdateEntityStatuses).toHaveBeenCalledTimes(1);
+    expect(deIdServiceMock.bulkUpdateEntityStatuses).toHaveBeenCalledWith(dto, TEST_USER.uuid);
+    expect(result).toEqual({
+      jobId: 'job-1',
+      updatedCount: 2,
+      findings: [],
+    });
   });
 
   it('should return remote NLP health status', async () => {
@@ -184,5 +250,79 @@ describe('DeIdController', () => {
         deIdentificationMethodUsage: [{ method: 'Redact', value: 6 }],
       },
     });
+  });
+
+  it('should call service generateSyntheticTable and return table response', async () => {
+    const dto: GenerateSyntheticTableRequestDto = {
+      jobId: 'job-1',
+      text: 'Patient John Doe visited on 2026-01-10',
+      count: 3,
+      outputFormat: SyntheticOutputFormat.TXT,
+    };
+    const serviceResponse = {
+      generationId: 'gen-uuid-1',
+      columns: ['PERSON', 'DATE & TIME'],
+      rows: [{ variantNumber: 1, entities: { PERSON: 'Alex Reed', 'DATE & TIME': '1995-03-12' } }],
+      summary: { totalRows: 1, generatedAt: '2026-05-14T10:00:00.000Z', framework: 'GDPR_EU' },
+    };
+
+    deIdServiceMock.generateSyntheticTable.mockResolvedValue(serviceResponse);
+
+    const result = await controller.generateSyntheticTable(dto, TEST_USER);
+
+    expect(deIdServiceMock.generateSyntheticTable).toHaveBeenCalledTimes(1);
+    expect(deIdServiceMock.generateSyntheticTable).toHaveBeenCalledWith(dto, TEST_USER.uuid);
+    expect(result).toEqual(serviceResponse);
+  });
+
+  it('should call service downloadSyntheticArchive and return StreamableFile', async () => {
+    deIdServiceMock.downloadSyntheticArchive.mockResolvedValue({
+      jobId: 'job-1',
+      variantsGenerated: 3,
+      outputFormat: SyntheticOutputFormat.TXT,
+      mimeType: 'application/zip',
+      filename: 'synthetic-variants-job-1.zip',
+      archiveBuffer: Buffer.from('zip-content'),
+    });
+
+    const result = await controller.downloadSyntheticArchive('gen-uuid-1', TEST_USER);
+
+    expect(deIdServiceMock.downloadSyntheticArchive).toHaveBeenCalledTimes(1);
+    expect(deIdServiceMock.downloadSyntheticArchive).toHaveBeenCalledWith(
+      'gen-uuid-1',
+      TEST_USER.uuid,
+    );
+    expect(result).toBeInstanceOf(StreamableFile);
+    expect(result.getHeaders()).toMatchObject({
+      type: 'application/zip',
+      disposition: 'attachment; filename="synthetic-variants-job-1.zip"',
+    });
+  });
+
+  it('should call service regenerateSyntheticTable and return new table response', async () => {
+    const dto: RegenerateSyntheticTableRequestDto = {
+      count: 3,
+      outputFormat: SyntheticOutputFormat.TXT,
+    };
+    const serviceResponse = {
+      generationId: 'gen-uuid-2',
+      columns: ['PERSON', 'DATE & TIME'],
+      rows: [
+        { variantNumber: 1, entities: { PERSON: 'Jordan Parker', 'DATE & TIME': '1988-07-04' } },
+      ],
+      summary: { totalRows: 1, generatedAt: '2026-05-14T10:01:00.000Z', framework: 'GDPR_EU' },
+    };
+
+    deIdServiceMock.regenerateSyntheticTable.mockResolvedValue(serviceResponse);
+
+    const result = await controller.regenerateSyntheticTable('gen-uuid-1', dto, TEST_USER);
+
+    expect(deIdServiceMock.regenerateSyntheticTable).toHaveBeenCalledTimes(1);
+    expect(deIdServiceMock.regenerateSyntheticTable).toHaveBeenCalledWith(
+      'gen-uuid-1',
+      dto,
+      TEST_USER.uuid,
+    );
+    expect(result).toEqual(serviceResponse);
   });
 });

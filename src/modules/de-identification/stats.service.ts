@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { EntityManager } from 'typeorm';
-import { ComplianceFramework } from '@common/constants/compliance.constants';
+import { ComplianceFramework, DetectedEntityStatus } from '@common/constants/compliance.constants';
 import { DeIdJobStatus } from '@common/db/entities/de-id-job.entity';
 import {
   DE_ID_STATS_CONFIDENCE_BUCKETS,
@@ -246,8 +246,13 @@ export default class StatsService {
         WHERE dj.userUuid = ?
           AND dj.createdAt >= CONVERT_TZ(?, ?, ?)
           AND dj.createdAt < CONVERT_TZ(?, ?, ?)
+          AND COALESCE(de.userStatus, de.systemStatus) = ?
       `,
-      [userUuid, ...StatsService.buildDateRangeSqlParams(range, dateWindow.timezone)],
+      [
+        userUuid,
+        ...StatsService.buildDateRangeSqlParams(range, dateWindow.timezone),
+        DetectedEntityStatus.ACTIVE,
+      ],
     )) as CountRow[];
 
     const statusCountRows = (await this.entityManager.query(
@@ -343,10 +348,15 @@ export default class StatsService {
         WHERE dj.userUuid = ?
           AND dj.createdAt >= CONVERT_TZ(?, ?, ?)
           AND dj.createdAt < CONVERT_TZ(?, ?, ?)
+          AND COALESCE(de.userStatus, de.systemStatus) = ?
         GROUP BY de.category
         ORDER BY value DESC
       `,
-      [userUuid, ...StatsService.buildDateRangeSqlParams(range, dateWindow.timezone)],
+      [
+        userUuid,
+        ...StatsService.buildDateRangeSqlParams(range, dateWindow.timezone),
+        DetectedEntityStatus.ACTIVE,
+      ],
     )) as LabelCountRow[];
 
     return rows.map((row) => ({
@@ -386,6 +396,7 @@ export default class StatsService {
         WHERE dj.userUuid = ?
           AND dj.createdAt >= CONVERT_TZ(?, ?, ?)
           AND dj.createdAt < CONVERT_TZ(?, ?, ?)
+          AND COALESCE(de.userStatus, de.systemStatus) = ?
         GROUP BY dayLabel
         ORDER BY dayLabel ASC
       `,
@@ -394,6 +405,7 @@ export default class StatsService {
         dateWindow.timezone,
         userUuid,
         ...StatsService.buildDateRangeSqlParams(range, dateWindow.timezone),
+        DetectedEntityStatus.ACTIVE,
       ],
     )) as ProcessingHistoryRow[];
 
@@ -434,8 +446,13 @@ export default class StatsService {
         WHERE dj.userUuid = ?
           AND dj.createdAt >= CONVERT_TZ(?, ?, ?)
           AND dj.createdAt < CONVERT_TZ(?, ?, ?)
+          AND COALESCE(de.userStatus, de.systemStatus) = ?
       `,
-      [userUuid, ...StatsService.buildDateRangeSqlParams(range, dateWindow.timezone)],
+      [
+        userUuid,
+        ...StatsService.buildDateRangeSqlParams(range, dateWindow.timezone),
+        DetectedEntityStatus.ACTIVE,
+      ],
     )) as ConfidenceDistributionRow[];
 
     const row = rows[0] ?? {};
@@ -477,10 +494,15 @@ export default class StatsService {
         WHERE dj.userUuid = ?
           AND dj.createdAt >= CONVERT_TZ(?, ?, ?)
           AND dj.createdAt < CONVERT_TZ(?, ?, ?)
+          AND COALESCE(de.userStatus, de.systemStatus) = ?
         GROUP BY de.proxyType
         ORDER BY value DESC
       `,
-      [userUuid, ...StatsService.buildDateRangeSqlParams(range, dateWindow.timezone)],
+      [
+        userUuid,
+        ...StatsService.buildDateRangeSqlParams(range, dateWindow.timezone),
+        DetectedEntityStatus.ACTIVE,
+      ],
     )) as LabelCountRow[];
 
     return rows.map((row) => {
