@@ -133,7 +133,6 @@ export class GenerateSyntheticVariantsRequestDto {
   })
   @IsNumber()
   @Min(1)
-  @Max(20)
   readonly count!: number;
 
   @ApiProperty({
@@ -165,7 +164,6 @@ export class GenerateSyntheticTableRequestDto {
   })
   @IsNumber()
   @Min(1)
-  @Max(20)
   readonly count!: number;
 
   @ApiProperty({
@@ -180,11 +178,10 @@ export class GenerateSyntheticTableRequestDto {
 export class RegenerateSyntheticTableRequestDto {
   @ApiProperty({
     example: 5,
-    description: 'Number of synthetic rows to regenerate.',
+    description: 'Number of synthetic rows to regenerate. Max limit from environment config.',
   })
   @IsNumber()
   @Min(1)
-  @Max(20)
   readonly count!: number;
 
   @ApiProperty({
