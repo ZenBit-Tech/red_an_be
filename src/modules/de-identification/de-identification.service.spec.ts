@@ -1409,6 +1409,46 @@ describe('DeIdService', () => {
     ).rejects.toThrow(BadRequestException);
   });
 
+  it('should reject synthetic variants count above configured max', async () => {
+    const sourceText = 'John Doe visited on 2025-02-14. Contact: +49 30 1234567';
+    const sourceTextHash = createHash('sha256').update(sourceText).digest('hex');
+
+    configServiceMock.get.mockReturnValue('2');
+
+    entityManagerMock.findOne.mockResolvedValue({
+      id: 'job-synthetic-max-check',
+      userUuid: 'user-1',
+      framework: ComplianceFramework.GDPR_EU,
+      sourceTextHash,
+      sourceTextLength: sourceText.length,
+    } satisfies Partial<DeIdJob>);
+
+    entityManagerMock.find.mockResolvedValue([
+      {
+        id: 'entity-1',
+        jobId: 'job-synthetic-max-check',
+        category: 'PERSON',
+        confidence: 95,
+        start: 0,
+        end: 4,
+        proxyType: 'Redact',
+        systemStatus: DetectedEntityStatus.ACTIVE,
+      },
+    ] satisfies Partial<DetectedEntity>[]);
+
+    await expect(
+      service.generateSyntheticVariants(
+        {
+          jobId: 'job-synthetic-max-check',
+          text: sourceText,
+          count: 3,
+          outputFormat: SyntheticOutputFormat.TXT,
+        },
+        'user-1',
+      ),
+    ).rejects.toThrow(BadRequestException);
+  });
+
   it('should reject preview when text is inconsistent with analyzed input', async () => {
     entityManagerMock.findOne.mockResolvedValue({
       id: 'job-1',
@@ -3687,6 +3727,46 @@ describe('DeIdService', () => {
         ),
       ).rejects.toThrow(BadRequestException);
     });
+
+    it('should reject generateSyntheticTable count above configured max', async () => {
+      const sourceText = 'John Doe visited on 2025-02-14. Contact: +49 30 1234567';
+      const sourceTextHash = createHash('sha256').update(sourceText).digest('hex');
+
+      configServiceMock.get.mockReturnValue('2');
+
+      entityManagerMock.findOne.mockResolvedValue({
+        id: 'job-table-max-check',
+        userUuid: 'user-1',
+        framework: ComplianceFramework.GDPR_EU,
+        sourceTextHash,
+        sourceTextLength: sourceText.length,
+      } satisfies Partial<DeIdJob>);
+
+      entityManagerMock.find.mockResolvedValue([
+        {
+          id: 'entity-1',
+          jobId: 'job-table-max-check',
+          category: 'PERSON',
+          confidence: 95,
+          start: 0,
+          end: 8,
+          proxyType: 'Redact',
+          systemStatus: DetectedEntityStatus.ACTIVE,
+        },
+      ] satisfies Partial<DetectedEntity>[]);
+
+      await expect(
+        service.generateSyntheticTable(
+          {
+            jobId: 'job-table-max-check',
+            text: sourceText,
+            count: 3,
+            outputFormat: SyntheticOutputFormat.TXT,
+          },
+          'user-1',
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
   });
 
   describe('downloadSyntheticArchive', () => {
@@ -3847,6 +3927,40 @@ describe('DeIdService', () => {
           'user-1',
         ),
       ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('should reject regenerateSyntheticTable count above configured max', async () => {
+      configServiceMock.get.mockReturnValue('2');
+
+      syntheticGenerationStoreMock.get.mockReturnValue({
+        jobId: 'job-regen',
+        userUuid: 'user-1',
+        framework: ComplianceFramework.GDPR_EU,
+        columns: ['PERSON'],
+        entityMappings: [
+          {
+            instanceKey: 'PERSON',
+            category: 'PERSON',
+            start: 0,
+            end: 8,
+            originalValue: 'John Doe',
+          },
+        ],
+        entityRows: [{ variantNumber: 1, entities: { PERSON: 'Old Name One' } }],
+        outputFormat: SyntheticOutputFormat.TXT,
+        originalText: 'John Doe visited on 2025-02-14',
+        baseOrdinal: 0,
+        generatedAt: new Date(),
+        expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+      });
+
+      await expect(
+        service.regenerateSyntheticTable(
+          'gen-uuid-old',
+          { count: 3, outputFormat: SyntheticOutputFormat.TXT },
+          'user-1',
+        ),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 });

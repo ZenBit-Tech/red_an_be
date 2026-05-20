@@ -995,8 +995,7 @@ export default class DeIdService {
       }
 
       const configuredMaxVariants = this.getSyntheticMaxVariants();
-      const boundedCount = Math.min(dto.count, configuredMaxVariants);
-      const variantsCount = Math.max(boundedCount, SYNTHETIC_VARIANTS_MIN_COUNT);
+      const variantsCount = DeIdService.validateSyntheticCount(dto.count, configuredMaxVariants);
 
       const variants = Array.from({ length: variantsCount }, (_, index) =>
         DeIdService.buildSyntheticTextVariant(dto.text, job.framework, activeEntities, index + 1),
@@ -1061,8 +1060,7 @@ export default class DeIdService {
       }
 
       const configuredMaxVariants = this.getSyntheticMaxVariants();
-      const boundedCount = Math.min(dto.count, configuredMaxVariants);
-      const variantsCount = Math.max(boundedCount, SYNTHETIC_VARIANTS_MIN_COUNT);
+      const variantsCount = DeIdService.validateSyntheticCount(dto.count, configuredMaxVariants);
       const baseOrdinal = 0;
 
       const { columns, entityMappings, entityRows } = DeIdService.buildSyntheticEntityRows(
@@ -1169,8 +1167,7 @@ export default class DeIdService {
 
     try {
       const configuredMaxVariants = this.getSyntheticMaxVariants();
-      const boundedCount = Math.min(dto.count, configuredMaxVariants);
-      const variantsCount = Math.max(boundedCount, SYNTHETIC_VARIANTS_MIN_COUNT);
+      const variantsCount = DeIdService.validateSyntheticCount(dto.count, configuredMaxVariants);
       const baseOrdinal =
         stored.baseOrdinal + stored.entityRows.length + Math.floor(Math.random() * 9000) + 1000;
 
@@ -1201,7 +1198,11 @@ export default class DeIdService {
         summary: { totalRows: variantsCount, generatedAt, framework: stored.framework },
       };
     } catch (error: unknown) {
-      if (error instanceof ForbiddenException || error instanceof NotFoundException) {
+      if (
+        error instanceof ForbiddenException ||
+        error instanceof NotFoundException ||
+        error instanceof BadRequestException
+      ) {
         throw error;
       }
 
@@ -1220,6 +1221,22 @@ export default class DeIdService {
     }
 
     return DE_ID_SYNTHETIC_DEFAULTS.MAX_VARIANTS;
+  }
+
+  private static validateSyntheticCount(count: number, maxVariants: number): number {
+    if (count < SYNTHETIC_VARIANTS_MIN_COUNT) {
+      throw new BadRequestException(
+        `Synthetic count must be at least ${SYNTHETIC_VARIANTS_MIN_COUNT}`,
+      );
+    }
+
+    if (count > maxVariants) {
+      throw new BadRequestException(
+        `Synthetic count exceeds maximum allowed value (${maxVariants})`,
+      );
+    }
+
+    return count;
   }
 
   private static buildSyntheticEntityRows(
