@@ -1,12 +1,19 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsNotEmpty } from 'class-validator';
+import { IsEnum } from 'class-validator';
+import { BILLING_PLAN_TIER } from '@common/constants/billing.constants';
+
+export const CHECKOUT_TARGET_PLAN = {
+  PROFESSIONAL: BILLING_PLAN_TIER.PROFESSIONAL,
+} as const;
+
+export type CheckoutTargetPlan = (typeof CHECKOUT_TARGET_PLAN)[keyof typeof CHECKOUT_TARGET_PLAN];
 
 export default class CreateCheckoutSessionDto {
   @ApiProperty({
-    example: 'price_1TJX2rJYsXYgdDVrgYY88YrD',
-    description: 'Stripe Price ID for the selected subscription plan',
+    example: CHECKOUT_TARGET_PLAN.PROFESSIONAL,
+    description: 'Target plan for checkout. Only PROFESSIONAL is supported.',
+    enum: CHECKOUT_TARGET_PLAN,
   })
-  @IsString()
-  @IsNotEmpty()
-  readonly priceId!: string;
+  @IsEnum(CHECKOUT_TARGET_PLAN)
+  readonly targetPlan!: CheckoutTargetPlan;
 }

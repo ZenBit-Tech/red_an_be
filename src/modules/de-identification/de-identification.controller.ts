@@ -14,6 +14,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import JwtAuthGuard from '../auth/guards/jwt-auth.guard';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import DeIdService from './de-identification.service';
+import BillingService from '../billing/billing.service';
 import {
   AnalyzeRequestDto,
   BulkUpdateEntityStatusesRequestDto,
@@ -41,6 +42,7 @@ export default class DeIdController {
   constructor(
     private readonly deIdService: DeIdService,
     private readonly statsService: StatsService,
+    private readonly billingService: BillingService,
   ) {}
 
   @Post('analyze')
@@ -50,6 +52,7 @@ export default class DeIdController {
     @Body() dto: AnalyzeRequestDto,
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<AnalyzeResponseDto> {
+    await this.billingService.consumeDeIdDocumentUsage(user.uuid);
     return this.deIdService.analyzeText(dto, user.uuid);
   }
 

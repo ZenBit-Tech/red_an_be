@@ -1,5 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import { QueryFailedError, Repository } from 'typeorm';
+import DailyUsage from '@common/db/entities/daily-usage.entity';
 import Subscription from '@common/db/entities/subscription.entity';
 import StripeWebhookEvent from '@common/db/entities/stripe-webhook-event.entity';
 import User from '@common/db/entities/user.entity';
@@ -8,6 +9,7 @@ import BillingService from './billing.service';
 const TEST_SECRET = 'test_secret';
 const TEST_WEBHOOK_SECRET = 'whsec_test';
 const TEST_FRONTEND_DOMAIN = 'http://localhost:5173';
+const TEST_STRIPE_PRO_PRICE_ID = 'price_test_professional';
 
 type UserRepositoryContract = Pick<Repository<User>, 'findOne' | 'update'>;
 type SubscriptionRepositoryContract = Pick<Repository<Subscription>, 'upsert'>;
@@ -30,6 +32,9 @@ describe('BillingService', () => {
         if (key === 'FRONTEND_DOMAIN') {
           return TEST_FRONTEND_DOMAIN;
         }
+        if (key === 'STRIPE_PRO_PRICE_ID') {
+          return TEST_STRIPE_PRO_PRICE_ID;
+        }
         throw new Error(`Unexpected config key: ${key}`);
       }),
     };
@@ -43,6 +48,13 @@ describe('BillingService', () => {
       upsert: jest.fn(),
     };
 
+    const dailyUsageRepositoryMock: Pick<Repository<DailyUsage>, 'findOne' | 'manager'> = {
+      findOne: jest.fn(),
+      manager: {
+        transaction: jest.fn(),
+      } as unknown as Repository<DailyUsage>['manager'],
+    };
+
     stripeWebhookEventRepositoryMock = {
       insert: jest.fn(),
     };
@@ -52,6 +64,7 @@ describe('BillingService', () => {
       userRepositoryMock as unknown as Repository<User>,
       subscriptionRepositoryMock as unknown as Repository<Subscription>,
       stripeWebhookEventRepositoryMock as unknown as Repository<StripeWebhookEvent>,
+      dailyUsageRepositoryMock as unknown as Repository<DailyUsage>,
     );
   });
 
