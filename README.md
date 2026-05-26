@@ -99,7 +99,7 @@ DB_NAME=red_an_be_db
 FRONTEND_DOMAIN=http://localhost:5173
 
 STRIPE_SECRET_KEY=sk_test_your_stripe_secret_key_here
-STRIPE_PRO_PRICE_ID=price_1TZomeRhzMsIdNl73zIrAyST
+STRIPE_PRO_PRICE_ID=price_2hgfdhgfdHGFHGHFJytdbn
 STRIPE_WEBHOOK_SECRET=whsec_your_stripe_webhook_secret_here
 ```
 
