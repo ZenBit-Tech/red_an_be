@@ -2,6 +2,7 @@ import { Body, Controller, Post, UseGuards, Get, Param } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
+  ApiOkResponse,
   ApiOperation,
   ApiTags,
   ApiUnauthorizedResponse,
@@ -14,6 +15,7 @@ import { CurrentUser } from '@auth/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '@auth/types/authenticated-user.type';
 import BillingService from '@billing/billing.service';
 import CreateCheckoutSessionDto from '@billing/dto/create-checkout-session.dto';
+import PaymentHistory from '@common/db/entities/payment-history.entity';
 
 class CheckoutSessionResponseDto {
   url!: string;
@@ -103,5 +105,29 @@ export default class BillingController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<BillingStatusResponseDto> {
     return this.billingService.getBillingStatus(user.uuid);
+  }
+
+  @Get('subscription')
+  @ApiOperation({ summary: 'Get current subscription details for the authenticated user' })
+  async getSubscription(@CurrentUser() user: AuthenticatedUser) {
+    return this.billingService.getSubscriptionByUserId(user.uuid);
+  }
+
+  @Post('cancel-subscription')
+  @ApiOperation({ summary: 'Cancel current subscription' })
+  async cancelSubscription(@CurrentUser() user: AuthenticatedUser) {
+    return this.billingService.cancelSubscription(user.uuid);
+  }
+
+  @Get('history')
+  @ApiOperation({ summary: 'Get billing and payment history for the authenticated user' })
+  @ApiOkResponse({
+    description: 'Array of payment history records',
+    type: [PaymentHistory],
+  })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid access token' })
+  @ApiInternalServerErrorResponse({ description: 'Failed to retrieve payment history' })
+  async getPaymentHistory(@CurrentUser() user: AuthenticatedUser): Promise<PaymentHistory[]> {
+    return this.billingService.getPaymentHistoryByUserId(user.uuid);
   }
 }
