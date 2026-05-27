@@ -19,6 +19,30 @@ class CheckoutSessionResponseDto {
   url!: string;
 }
 
+class CustomerPortalResponseDto {
+  url!: string;
+}
+
+class BillingStatusResponseDto {
+  planTier!: string;
+
+  planStatus!: string;
+
+  dailyLimit!: number | null;
+
+  usedToday!: number;
+
+  remainingToday!: number | null;
+
+  currentPeriodEnd!: Date | null;
+
+  hasActiveSubscription!: boolean;
+
+  canUpgrade!: boolean;
+
+  canManageSubscription!: boolean;
+}
+
 @ApiTags(BILLING_TAG)
 @ApiBearerAuth()
 @Controller(BILLING_ROUTE)
@@ -38,7 +62,21 @@ export default class BillingController {
     @Body() dto: CreateCheckoutSessionDto,
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<CheckoutSessionResponseDto> {
-    return this.billingService.createCheckoutSession(user.uuid, dto.priceId);
+    return this.billingService.createCheckoutSession(user.uuid, dto.targetPlan);
+  }
+
+  @Post('customer-portal')
+  @ApiOperation({ summary: 'Create a Stripe Customer Portal session for the authenticated user' })
+  @ApiCreatedResponse({
+    description: 'Stripe-hosted customer portal URL for subscription management',
+    type: CustomerPortalResponseDto,
+  })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid access token' })
+  @ApiInternalServerErrorResponse({ description: 'Failed to create customer portal session' })
+  async createCustomerPortalSession(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<CustomerPortalResponseDto> {
+    return this.billingService.createCustomerPortalSession(user.uuid);
   }
 
   @Get('checkout-session/:sessionId')
@@ -48,5 +86,14 @@ export default class BillingController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.billingService.getCheckoutSessionStatus(user.uuid, sessionId);
+  }
+
+  @Get('status')
+  @ApiOperation({ summary: 'Get billing status and daily usage for the authenticated user' })
+  @ApiCreatedResponse({ type: BillingStatusResponseDto })
+  async getBillingStatus(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<BillingStatusResponseDto> {
+    return this.billingService.getBillingStatus(user.uuid);
   }
 }

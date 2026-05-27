@@ -255,6 +255,102 @@ Success response:
 }
 ```
 
+## Billing and Subscription Endpoints
+
+The backend supports two plans:
+
+- `FREE`: internal tier, no Stripe subscription, limit `2` accepted documents/day.
+- `PROFESSIONAL`: paid Stripe subscription, no daily limit.
+
+### Create checkout session (free -> professional)
+
+Endpoint:
+
+```http
+POST /billing/create-checkout-session
+Content-Type: application/json
+Authorization: Bearer <jwt-token>
+```
+
+Request body:
+
+```json
+{
+  "targetPlan": "PROFESSIONAL"
+}
+```
+
+Success response:
+
+```json
+{
+  "url": "https://checkout.stripe.com/c/pay/cs_test_..."
+}
+```
+
+Notes:
+
+- Frontend does not send raw Stripe `priceId`.
+- Backend maps the professional plan to Stripe price from env.
+
+### Create customer portal session (manage paid subscription)
+
+Endpoint:
+
+```http
+POST /billing/customer-portal
+Authorization: Bearer <jwt-token>
+```
+
+Success response:
+
+```json
+{
+  "url": "https://billing.stripe.com/p/session/test_..."
+}
+```
+
+Use this URL for the subscription management page. This flow is used for:
+
+- canceling paid subscription (`professional -> free` flow)
+- changing paid subscription settings inside Stripe portal
+
+### Get billing status
+
+Endpoint:
+
+```http
+GET /billing/status
+Authorization: Bearer <jwt-token>
+```
+
+Success response:
+
+```json
+{
+  "planTier": "PROFESSIONAL",
+  "planStatus": "ACTIVE",
+  "dailyLimit": null,
+  "usedToday": 0,
+  "remainingToday": null,
+  "currentPeriodEnd": "2026-06-24T10:22:59.000Z",
+  "hasActiveSubscription": true,
+  "canUpgrade": false,
+  "canManageSubscription": true
+}
+```
+
+### Frontend flow summary
+
+- `FREE -> PROFESSIONAL`: call `/billing/create-checkout-session` and redirect to returned URL.
+- `PROFESSIONAL` management: call `/billing/customer-portal` and redirect to returned URL.
+- After redirect back from Stripe, call `/billing/status` to refresh UI state.
+
+### Cancel at period end behavior
+
+If user cancels with `cancel_at_period_end`, backend keeps professional access until `currentPeriodEnd`.
+After period end, backend switches user to free tier.
+
 ### Build anonymized preview
 
 Endpoint:
@@ -460,12 +556,15 @@ export async function downloadSyntheticVariants(
 
 - `401 Unauthorized`: missing or invalid JWT token.
 - `400 Bad Request`: invalid payload, invalid UUID, or invalid timezone.
+- `403 Forbidden`: free daily limit reached (`Daily free plan limit exceeded`).
 - `500 Internal Server Error`: processing/analyzer failure.
 
 ## Frontend Checklist
 
 - Save and refresh JWT token after magic-link callback.
 - Send Bearer token for all `/de-identification/*` routes.
+- Integrate `/billing/status` into subscription page state.
+- Use `/billing/create-checkout-session` for upgrade and `/billing/customer-portal` for paid-plan management.
 - Always send user timezone for stats.
 - Handle empty chart arrays and zero-value summary gracefully.
 - Build chart labels from backend response values rather than hardcoded assumptions.

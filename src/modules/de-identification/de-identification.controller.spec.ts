@@ -13,6 +13,7 @@ import {
 } from './dto/request.dto';
 import { DeIdStatsQueryDto } from './dto/stats-query.dto';
 import StatsService from './stats.service';
+import BillingService from '../billing/billing.service';
 
 type DeIdServiceContract = Pick<
   DeIdService,
@@ -25,6 +26,7 @@ type DeIdServiceContract = Pick<
   | 'regenerateSyntheticTable'
 >;
 type StatsServiceContract = Pick<StatsService, 'getDashboardData'>;
+type BillingServiceContract = Pick<BillingService, 'consumeDeIdDocumentUsage'>;
 const TEST_USER = {
   uuid: 'user-uuid-1',
   email: 'user@example.com',
@@ -44,6 +46,9 @@ describe('DeIdController', () => {
   let statsServiceMock: {
     getDashboardData: jest.Mock;
   };
+  let billingServiceMock: {
+    consumeDeIdDocumentUsage: jest.Mock;
+  };
 
   beforeEach(() => {
     deIdServiceMock = {
@@ -60,9 +65,14 @@ describe('DeIdController', () => {
       getDashboardData: jest.fn(),
     };
 
+    billingServiceMock = {
+      consumeDeIdDocumentUsage: jest.fn().mockResolvedValue(undefined),
+    };
+
     controller = new DeIdController(
       deIdServiceMock as unknown as DeIdServiceContract as DeIdService,
       statsServiceMock as unknown as StatsServiceContract as StatsService,
+      billingServiceMock as unknown as BillingServiceContract as BillingService,
     );
   });
 
@@ -86,6 +96,8 @@ describe('DeIdController', () => {
 
     const result = await controller.analyze(dto, TEST_USER);
 
+    expect(billingServiceMock.consumeDeIdDocumentUsage).toHaveBeenCalledTimes(1);
+    expect(billingServiceMock.consumeDeIdDocumentUsage).toHaveBeenCalledWith(TEST_USER.uuid);
     expect(deIdServiceMock.analyzeText).toHaveBeenCalledTimes(1);
     expect(deIdServiceMock.analyzeText).toHaveBeenCalledWith(dto, TEST_USER.uuid);
     expect(result).toEqual({ jobId: 'job-1', findings: [] });

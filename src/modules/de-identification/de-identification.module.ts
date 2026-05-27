@@ -9,9 +9,10 @@ import PresidioClient from './presidio.client';
 import RemoteNlpClient from './remote-nlp.client';
 import SyntheticGenerationStore from './synthetic-generation.store';
 import AuthModule from '../auth/auth.module';
+import BillingModule from '../billing/billing.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([DeIdJob, DetectedEntity]), AuthModule],
+  imports: [TypeOrmModule.forFeature([DeIdJob, DetectedEntity]), AuthModule, BillingModule],
   controllers: [DeIdController],
   providers: [DeIdService, StatsService, PresidioClient, RemoteNlpClient, SyntheticGenerationStore],
   exports: [DeIdService],

@@ -80,7 +80,7 @@ npm install
 cp .env.example .env
 ```
 
-Edit `.env` with your MySQL credentials:
+Edit `.env` with your required runtime settings (database, auth, billing):
 
 ```env
 PORT=3000
@@ -95,7 +95,15 @@ DB_USERNAME=app_user
 DB_PASSWORD=your_password
 DB_ROOT_PASSWORD=your_root_password
 DB_NAME=red_an_be_db
+
+FRONTEND_DOMAIN=http://localhost:5173
+
+STRIPE_SECRET_KEY=sk_test_your_stripe_secret_key_here
+STRIPE_PRO_PRICE_ID=price_2hgfdhgfdHGFHGHFJytdbn
+STRIPE_WEBHOOK_SECRET=whsec_your_stripe_webhook_secret_here
 ```
+
+Use `.env.example` as the source of truth for the full list of supported environment variables.
 
 ### 3. Run migrations
 
