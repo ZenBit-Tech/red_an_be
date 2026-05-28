@@ -330,6 +330,10 @@ Success response:
 {
   "planTier": "PROFESSIONAL",
   "planStatus": "ACTIVE",
+  "billingPhase": "PAID",
+  "isTrialing": false,
+  "trialEndsAt": null,
+  "trialDaysLeft": null,
   "dailyLimit": null,
   "usedToday": 0,
   "remainingToday": null,
@@ -345,6 +349,8 @@ Success response:
 - `FREE -> PROFESSIONAL`: call `/billing/create-checkout-session` and redirect to returned URL.
 - `PROFESSIONAL` management: call `/billing/customer-portal` and redirect to returned URL.
 - After redirect back from Stripe, call `/billing/status` to refresh UI state.
+- First professional checkout starts a 3-day Stripe trial. During that period `/billing/status` still returns `PROFESSIONAL` with active access.
+- Trial details are exposed through `billingPhase`, `isTrialing`, `trialEndsAt`, and `trialDaysLeft`.
 
 ### Cancel at period end behavior
 

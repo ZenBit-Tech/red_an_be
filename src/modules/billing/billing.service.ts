@@ -21,8 +21,10 @@ import {
   BILLING_DEFAULT_TIMEZONE,
   BILLING_ENV,
   BILLING_ERRORS,
+  BILLING_PHASE,
   BILLING_FREE_DAILY_DOCUMENT_LIMIT,
   BILLING_PATHS,
+  BILLING_PROFESSIONAL_TRIAL_DAYS,
   BILLING_PLAN_STATUS,
   BILLING_PLAN_TIER,
   BILLING_STRIPE_ACTIVE_STATUSES,
@@ -34,6 +36,10 @@ type CreateCustomerPortalSessionResult = { url: string };
 type BillingStatusResult = {
   planTier: User['planTier'];
   planStatus: User['planStatus'];
+  billingPhase: (typeof BILLING_PHASE)[keyof typeof BILLING_PHASE];
+  isTrialing: boolean;
+  trialEndsAt: Date | null;
+  trialDaysLeft: number | null;
   dailyLimit: number | null;
   usedToday: number;
   remainingToday: number | null;
@@ -44,6 +50,7 @@ type BillingStatusResult = {
 };
 const MYSQL_DUPLICATE_ENTRY_CODE = 'ER_DUP_ENTRY';
 const ENTITLEMENT_RECONCILE_STALE_MINUTES = 15;
+const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 
 @Injectable()
 export default class BillingService {
@@ -92,6 +99,7 @@ export default class BillingService {
       }
 
       const stripeCustomerId = await this.ensureStripeCustomer(user);
+      const trialPeriodDays = BillingService.getProfessionalTrialDays(user);
 
       const session = await this.stripe.checkout.sessions.create({
         mode: 'subscription',
@@ -100,7 +108,10 @@ export default class BillingService {
         success_url: `${this.frontendDomain}${BILLING_PATHS.SUCCESS}`,
         cancel_url: `${this.frontendDomain}${BILLING_PATHS.CANCEL}`,
         metadata: { userId, targetPlan },
-        subscription_data: { metadata: { userId, targetPlan } },
+        subscription_data: {
+          metadata: { userId, targetPlan },
+          ...(trialPeriodDays > 0 ? { trial_period_days: trialPeriodDays } : {}),
+        },
       });
 
       if (!session.url) {
@@ -165,13 +176,26 @@ export default class BillingService {
     const { dailyLimit } = reconciledUser;
     const isUnlimited = dailyLimit === null;
     const remainingToday = isUnlimited ? null : Math.max(dailyLimit - usedToday, 0);
+    const preferredSubscription = await this.findPreferredStoredSubscription(reconciledUser.uuid);
+    const isTrialingSubscription = preferredSubscription?.status === 'trialing';
+    const trialEndsAt = isTrialingSubscription ? preferredSubscription.currentPeriodEnd : null;
+    const trialDaysLeft = BillingService.resolveTrialDaysLeft(trialEndsAt);
     const hasActiveSubscription =
       reconciledUser.planTier === BILLING_PLAN_TIER.PROFESSIONAL &&
       reconciledUser.planStatus === BILLING_PLAN_STATUS.ACTIVE;
+    const billingPhase = BillingService.resolveBillingPhase(
+      reconciledUser.planStatus,
+      hasActiveSubscription,
+      isTrialingSubscription,
+    );
 
     return {
       planTier: reconciledUser.planTier,
       planStatus: reconciledUser.planStatus,
+      billingPhase,
+      isTrialing: isTrialingSubscription,
+      trialEndsAt,
+      trialDaysLeft,
       dailyLimit,
       usedToday,
       remainingToday,
@@ -266,7 +290,13 @@ export default class BillingService {
       currentPeriodEnd,
       subscription.cancel_at_period_end,
     );
-    await this.userRepository.update({ uuid: userId }, entitlementPatch);
+    await this.userRepository.update(
+      { uuid: userId },
+      {
+        ...entitlementPatch,
+        hasUsedProfessionalTrial: true,
+      },
+    );
 
     this.logger.log(
       `Subscription ${subscription.id} upserted for user ${userId} (status: ${subscription.status})`,
@@ -381,6 +411,96 @@ export default class BillingService {
       dailyLimit: BILLING_FREE_DAILY_DOCUMENT_LIMIT,
       entitlementsUpdatedAt: now,
     };
+  }
+
+  private static getProfessionalTrialDays(user: User): number {
+    return user.hasUsedProfessionalTrial ? 0 : BILLING_PROFESSIONAL_TRIAL_DAYS;
+  }
+
+  private static resolveTrialDaysLeft(trialEndsAt: Date | null): number | null {
+    if (!trialEndsAt) {
+      return null;
+    }
+
+    const diffMs = trialEndsAt.getTime() - Date.now();
+    if (diffMs <= 0) {
+      return 0;
+    }
+
+    return Math.ceil(diffMs / MILLISECONDS_PER_DAY);
+  }
+
+  private static resolveBillingPhase(
+    planStatus: User['planStatus'],
+    hasActiveSubscription: boolean,
+    isTrialingSubscription: boolean,
+  ): (typeof BILLING_PHASE)[keyof typeof BILLING_PHASE] {
+    if (isTrialingSubscription && hasActiveSubscription) {
+      return BILLING_PHASE.TRIAL;
+    }
+
+    if (hasActiveSubscription) {
+      return BILLING_PHASE.PAID;
+    }
+
+    if (planStatus === BILLING_PLAN_STATUS.PAST_DUE) {
+      return BILLING_PHASE.PAST_DUE;
+    }
+
+    if (planStatus === BILLING_PLAN_STATUS.CANCELED) {
+      return BILLING_PHASE.CANCELED;
+    }
+
+    return BILLING_PHASE.FREE;
+  }
+
+  private async findPreferredStoredSubscription(userId: string): Promise<Subscription | null> {
+    const subscriptions = await this.subscriptionRepository.find({
+      where: { userId },
+      order: { updatedAt: 'DESC', createdAt: 'DESC' },
+    });
+
+    return BillingService.selectPreferredStoredSubscription(subscriptions);
+  }
+
+  private static selectPreferredStoredSubscription(
+    subscriptions: Subscription[],
+  ): Subscription | null {
+    if (subscriptions.length === 0) {
+      return null;
+    }
+
+    const now = new Date();
+    const activeSubscription = subscriptions.find((subscription) =>
+      BILLING_STRIPE_ACTIVE_STATUSES.includes(
+        subscription.status as (typeof BILLING_STRIPE_ACTIVE_STATUSES)[number],
+      ),
+    );
+
+    if (activeSubscription) {
+      return activeSubscription;
+    }
+
+    const cancelAtPeriodEndSubscription = subscriptions.find(
+      (subscription) =>
+        subscription.cancelAtPeriodEnd &&
+        Boolean(subscription.currentPeriodEnd && subscription.currentPeriodEnd > now),
+    );
+
+    if (cancelAtPeriodEndSubscription) {
+      return cancelAtPeriodEndSubscription;
+    }
+
+    return subscriptions.slice().sort((first, second) => {
+      const firstPeriodEnd = first.currentPeriodEnd?.getTime() ?? 0;
+      const secondPeriodEnd = second.currentPeriodEnd?.getTime() ?? 0;
+
+      if (firstPeriodEnd !== secondPeriodEnd) {
+        return secondPeriodEnd - firstPeriodEnd;
+      }
+
+      return second.updatedAt.getTime() - first.updatedAt.getTime();
+    })[0];
   }
 
   private async reconcileExpiredProfessionalAccess(user: User): Promise<User> {

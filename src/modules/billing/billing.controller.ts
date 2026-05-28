@@ -28,6 +28,14 @@ class BillingStatusResponseDto {
 
   planStatus!: string;
 
+  billingPhase!: string;
+
+  isTrialing!: boolean;
+
+  trialEndsAt!: Date | null;
+
+  trialDaysLeft!: number | null;
+
   dailyLimit!: number | null;
 
   usedToday!: number;

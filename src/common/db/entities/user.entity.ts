@@ -24,6 +24,9 @@ export default class User {
   @Column({ type: 'varchar', length: 64, nullable: true })
   stripeCustomerId?: string | null;
 
+  @Column({ type: 'boolean', default: false })
+  hasUsedProfessionalTrial!: boolean;
+
   @Column({
     type: 'enum',
     enum: BILLING_PLAN_TIER,

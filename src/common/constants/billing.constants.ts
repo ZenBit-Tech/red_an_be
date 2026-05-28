@@ -26,9 +26,18 @@ export const BILLING_PLAN_STATUS = {
   CANCELED: 'CANCELED',
 } as const;
 
+export const BILLING_PHASE = {
+  FREE: 'FREE',
+  TRIAL: 'TRIAL',
+  PAID: 'PAID',
+  PAST_DUE: 'PAST_DUE',
+  CANCELED: 'CANCELED',
+} as const;
+
 export const BILLING_STRIPE_ACTIVE_STATUSES = ['active', 'trialing'] as const;
 
 export const BILLING_FREE_DAILY_DOCUMENT_LIMIT = 2;
+export const BILLING_PROFESSIONAL_TRIAL_DAYS = 3;
 export const BILLING_DEFAULT_TIMEZONE = 'UTC';
 
 export const BILLING_ERRORS = {
