@@ -59,6 +59,7 @@ import {
 } from './strategies/compliance.strategy';
 import {
   GDPR_EU_ANALYZER_ALLOW_LIST,
+  GDPR_UK_ANALYZER_ALLOW_LIST,
   HIPAA_ANALYZER_ALLOW_LIST,
   MEDICAL_ALLOWLIST,
   isInMedicalAllowlist,
@@ -127,8 +128,13 @@ const DATE_TIME_CONTEXT_KEYWORDS = [
   'issued',
 ];
 const STRUCTURED_FIELD_LABELS = [
+  'Date',
   'Clinic',
+  'Clinician',
+  'GP',
+  'Patient',
   'Date of Service',
+  'Date of appointment',
   'Provider',
   'Patient Name',
   'Name',
@@ -140,6 +146,7 @@ const STRUCTURED_FIELD_LABELS = [
   'Sex',
   'Address',
   'Phone',
+  'Telephone',
   'Contact',
   'Chief Complaint',
   'History of Present Illness',
@@ -162,6 +169,11 @@ const FIELD_MARKER_BOUNDARY_PATTERN = new RegExp(
 );
 const SOFT_BOUNDARY_FIELD_LABELS = [
   'Clinic',
+  'Clinician',
+  'GP',
+  'Patient',
+  'Date',
+  'Date of appointment',
   'Date of Service',
   'Provider',
   'Patient Name',
@@ -173,6 +185,7 @@ const SOFT_BOUNDARY_FIELD_LABELS = [
   'Sex',
   'Address',
   'Phone',
+  'Telephone',
   'Contact',
 ] as const;
 const FIELD_LABEL_SOFT_BOUNDARY_PATTERN = new RegExp(
@@ -212,7 +225,7 @@ const TEXTUAL_MONTH_PATTERN =
   /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/i;
 const STRICT_DATE_TOKEN_PATTERN =
   /^\s*(?:\d{1,2}[/. -]\d{1,2}(?:[/. -]\d{2,4})?|\d{1,2}[/. -]\d{4})\s*$/;
-const PHONE_LIKE_VALUE_PATTERN = /^\s*\+?\d(?:[\d\s().-]{5,}\d)?\s*$/;
+const PHONE_LIKE_VALUE_PATTERN = /^\s*\+?\d(?:[\d\s().\u002D\u2010-\u2015]{5,}\d)?\s*$/u;
 const PHONE_CONTEXT_KEYWORDS = ['phone', 'contact', 'tel', 'mobile', 'cell', 'fax'] as const;
 const PREVIEW_CATEGORY_PRIORITY: Readonly<Record<string, number>> = {
   PHONE_NUMBER: 120,
@@ -243,12 +256,60 @@ const GDPR_MANDATORY_PREVIEW_ENTITY_CATEGORIES = [
   'EMAIL_ADDRESS',
   'ADDRESS',
   'NATIONAL_ID',
+  'UK_NHS_NUMBER',
+  'UK_POSTCODE',
+  'UK_GP_PRACTICE_CODE',
   'ORGANIZATION',
   'DATE_TIME',
   'DATE_OF_BIRTH',
   'AGE',
 ] as const;
 const GDPR_PHONE_ENTITY_CATEGORIES = ['PHONE_NUMBER', 'PL_PHONE_NUMBER'] as const;
+const UK_HOSPITAL_KEYWORDS = ['hospital', 'foundation trust', 'nhs trust'] as const;
+const UK_GP_PRACTICE_KEYWORDS = [
+  'medical centre',
+  'medical center',
+  'gp practice',
+  'health practice',
+  'practice',
+  'surgery',
+] as const;
+const UK_MEDICAL_PROGRAM_ALLOWLIST = ['desmond', 'qismet', 'dafne'] as const;
+const MEDICAL_DIAGNOSIS_TERM_PATTERN = /\b[a-z][a-z-]{3,}(?:emia|tension)\b/i;
+const TIME_TOKEN_PATTERN = /\b(?:[01]?\d|2[0-3]):[0-5]\d\b/;
+const DURATION_TOKEN_PATTERN =
+  /\b\d{1,3}\s*(?:-|\u2010|\u2011|\u2012|\u2013|\u2014)?\s*(?:day|days|week|weeks|month|months|hour|hours)\b/i;
+const UK_PERSON_TITLE_PREFIX_PATTERN = /^(dr|doctor|mr|mrs|ms|miss|prof)\.?\s+/i;
+const UK_GENERIC_CLINIC_TERMS = [
+  'clinic',
+  'outpatient',
+  'department',
+  'medicine',
+  'service',
+  'unit',
+  'ward',
+] as const;
+const UK_NON_PERSON_STRUCTURED_LABELS = ['clinic', 'department', 'location'] as const;
+const UK_MEDICAL_PROCEDURE_PERSON_FALSE_POSITIVES = [
+  'chest x-ray',
+  'chest xray',
+  'x-ray',
+  'xray',
+  'transthoracic echocardiogram',
+  'echocardiogram',
+] as const;
+const UK_ROLE_TERMS_PERSON_FALSE_POSITIVES = ['general practitioner', 'practitioner'] as const;
+const UK_SENSITIVE_FACILITY_ORGANIZATION_PATTERN =
+  /\b((?:St\.?\s+[A-Z][A-Za-z'’]+(?:\s+[A-Z][A-Za-z'’]+){0,4}\s+(?:Hospital|NHS\s+Foundation\s+Trust|Foundation\s+Trust|Trust))|(?:[A-Z][A-Za-z'’]+(?:\s+[A-Z][A-Za-z'’]+){0,6}\s+(?:NHS\s+Foundation\s+Trust|Foundation\s+Trust)))\b/gi;
+const UK_SYNTHETIC_PERSON_ROLE = {
+  PATIENT: 'PATIENT',
+  RELATIVE: 'RELATIVE',
+  DOCTOR: 'DOCTOR',
+  PERSON: 'PERSON',
+} as const;
+type UkSyntheticPersonRole =
+  (typeof UK_SYNTHETIC_PERSON_ROLE)[keyof typeof UK_SYNTHETIC_PERSON_ROLE];
+type UkSyntheticPersonCounters = Record<UkSyntheticPersonRole, number>;
 const DEFAULT_PHI_VALIDATION_STRICT = true;
 const DEFAULT_PHI_VALIDATION_ALLOW_ZIP3 = true;
 const GDPR_PHI_SKIP_PATTERN_TYPES: ReadonlyArray<string> = ['SSN', 'ZIP', 'PHONE', 'IP'] as const;
@@ -551,6 +612,10 @@ export default class DeIdService {
         );
         const sanitizedFindings = DeIdService.sanitizeSpans(dto.text, deduplicatedFindings);
         const clinicHeaderFindings = DeIdService.extractClinicHeaderOrganizations(dto.text);
+        const ukFacilityFindings =
+          dto.framework === ComplianceFramework.GDPR_UK
+            ? DeIdService.extractUkSensitiveFacilityFindings(dto.text)
+            : [];
         const structuredAddressFindings = DeIdService.extractStructuredAddressFindings(dto.text);
         const structuredPhoneFindings = DeIdService.extractStructuredPhoneFindings(
           dto.text,
@@ -563,17 +628,28 @@ export default class DeIdService {
         const structuredNationalIdFindings = DeIdService.extractStructuredNationalIdFindings(
           dto.text,
         );
+        const familyHistoryAgeFindings =
+          dto.framework === ComplianceFramework.GDPR_UK
+            ? DeIdService.extractFamilyHistoryAgeFindings(dto.text)
+            : [];
         const occupationFindings =
-          dto.framework === ComplianceFramework.HIPAA
+          dto.framework === ComplianceFramework.HIPAA ||
+          dto.framework === ComplianceFramework.GDPR_UK
             ? DeIdService.extractOccupationFindings(dto.text)
             : [];
         const enrichedFindings = DeIdService.mergeFindings(
-          DeIdService.mergeFindings(sanitizedFindings, clinicHeaderFindings),
+          DeIdService.mergeFindings(
+            DeIdService.mergeFindings(sanitizedFindings, clinicHeaderFindings),
+            ukFacilityFindings,
+          ),
           DeIdService.mergeFindings(
             DeIdService.mergeFindings(structuredAddressFindings, structuredPhoneFindings),
             DeIdService.mergeFindings(
               DeIdService.mergeFindings(structuredDobFindings, structuredIssueDateFindings),
-              DeIdService.mergeFindings(structuredNationalIdFindings, occupationFindings),
+              DeIdService.mergeFindings(
+                DeIdService.mergeFindings(structuredNationalIdFindings, familyHistoryAgeFindings),
+                occupationFindings,
+              ),
             ),
           ),
         );
@@ -588,12 +664,18 @@ export default class DeIdService {
           enrichedFindings,
         );
         const guaranteedFindings = DeIdService.mergeFindings(
-          DeIdService.mergeFindings(contextFilteredFindings, clinicHeaderFindings),
+          DeIdService.mergeFindings(
+            DeIdService.mergeFindings(contextFilteredFindings, clinicHeaderFindings),
+            ukFacilityFindings,
+          ),
           DeIdService.mergeFindings(
             DeIdService.mergeFindings(structuredAddressFindings, structuredPhoneFindings),
             DeIdService.mergeFindings(
               DeIdService.mergeFindings(structuredDobFindings, structuredIssueDateFindings),
-              DeIdService.mergeFindings(structuredNationalIdFindings, occupationFindings),
+              DeIdService.mergeFindings(
+                DeIdService.mergeFindings(structuredNationalIdFindings, familyHistoryAgeFindings),
+                occupationFindings,
+              ),
             ),
           ),
         );
@@ -621,11 +703,13 @@ export default class DeIdService {
 
         const postProcessorFindings = [
           ...clinicHeaderFindings,
+          ...ukFacilityFindings,
           ...structuredAddressFindings,
           ...structuredPhoneFindings,
           ...structuredDobFindings,
           ...structuredIssueDateFindings,
           ...structuredNationalIdFindings,
+          ...familyHistoryAgeFindings,
           ...occupationFindings,
         ];
 
@@ -820,12 +904,23 @@ export default class DeIdService {
         dto.text,
         normalizedEntities,
       ).sort((first, second) => second.start - first.start);
+      const ukSyntheticPersonBySpanId =
+        dto.framework === ComplianceFramework.GDPR_UK
+          ? DeIdService.buildUkSyntheticPersonReplacementMap(dto.text, previewSpans)
+          : {};
 
       const anonymizedText = previewSpans.reduce((resultText, span) => {
         const originalValue = dto.text.substring(span.start, span.end);
 
         if (
           DeIdService.shouldKeepNonPhiGenderValue(dto.text, span.category, span.start, span.end)
+        ) {
+          return resultText;
+        }
+
+        if (
+          dto.framework === ComplianceFramework.GDPR_UK &&
+          DeIdService.isUkStructuredNonPersonPersonSpan(dto.text, span)
         ) {
           return resultText;
         }
@@ -847,7 +942,26 @@ export default class DeIdService {
         const entityStrategy = strategy.entities[span.category] ?? DEFAULT_ENTITY_STRATEGY;
         let replacement: string;
 
-        if (isGdprPhoneNumber) {
+        if (dto.framework === ComplianceFramework.GDPR_UK && span.category === 'PERSON') {
+          const syntheticToken = ukSyntheticPersonBySpanId[span.id] ?? '[SYNTHETIC_ID]';
+          replacement = DeIdService.applyUkSyntheticPersonToken(originalValue, syntheticToken);
+        } else if (
+          dto.framework === ComplianceFramework.GDPR_UK &&
+          span.category === 'ORGANIZATION' &&
+          ukSyntheticPersonBySpanId[span.id]
+        ) {
+          replacement = DeIdService.applyUkSyntheticPersonToken(
+            originalValue,
+            ukSyntheticPersonBySpanId[span.id],
+          );
+        } else if (
+          dto.framework === ComplianceFramework.GDPR_UK &&
+          span.category === 'ORGANIZATION'
+        ) {
+          replacement = DeIdService.getUkOrganizationReplacement(originalValue);
+        } else if (dto.framework === ComplianceFramework.GDPR_UK && span.category === 'ADDRESS') {
+          replacement = DeIdService.getUkAddressReplacement(dto.text, span.start, originalValue);
+        } else if (isGdprPhoneNumber) {
           // For GDPR phone entities: preserve country code, redact the rest
           const sanitized = DeIdService.sanitizePhoneForGdpr(originalValue);
           replacement = sanitized; // Returns "+CC [REDACT]" format
@@ -865,10 +979,15 @@ export default class DeIdService {
         );
       }, dto.text);
 
-      const normalizedText = normalizeAnonymizedText(anonymizedText);
+      const escapedText = DeIdService.escapeHtmlUnsafeCharacters(anonymizedText);
+      const normalizedText = normalizeAnonymizedText(escapedText);
+      const frameworkHardenedText =
+        dto.framework === ComplianceFramework.GDPR_UK
+          ? DeIdService.applyUkPatientIdentificationHardening(normalizedText)
+          : normalizedText;
       const validationMode = dto.validationMode ?? PreviewValidationMode.STRICT;
       const validationOptions = this.getPhiValidationOptions(dto.framework, validationMode);
-      const validationResult = validatePhi(normalizedText, validationOptions);
+      const validationResult = validatePhi(frameworkHardenedText, validationOptions);
 
       if (!validationResult.valid) {
         this.logger.warn(
@@ -877,7 +996,7 @@ export default class DeIdService {
       }
 
       return {
-        anonymizedText: normalizedText,
+        anonymizedText: frameworkHardenedText,
         postValidation: {
           valid: validationResult.valid,
           mode: validationMode,
@@ -1782,9 +1901,14 @@ export default class DeIdService {
 
     const charsToMask = DeIdService.getNumberParam(operator, 'chars') ?? value.length;
     const keepLast = DeIdService.getNumberParam(operator, 'keepLast') ?? 0;
+    const redactDomain = operator.params?.redactDomain === true;
 
     const [localPart, domain] = value.split('@');
     if (localPart && domain) {
+      if (redactDomain) {
+        return `${'*'.repeat(localPart.length)}@[REDACT]`;
+      }
+
       const visibleLocalPartLength = Math.max(localPart.length - charsToMask, 0);
       const maskedLocalPart =
         '*'.repeat(localPart.length - visibleLocalPartLength) +
@@ -1809,6 +1933,14 @@ export default class DeIdService {
         ? operator.params.strict
         : false;
     if (keep === 'year') {
+      if (DURATION_TOKEN_PATTERN.test(value)) {
+        return value;
+      }
+
+      if (TIME_TOKEN_PATTERN.test(value)) {
+        return value.replace(/\b(?:[01]?\d|2[0-3]):[0-5]\d\b/g, '[TIME]');
+      }
+
       const textualMonthYearMatch = value.match(
         /\b(?:\d{1,2}\s+)?(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{4})\b/i,
       );
@@ -1875,6 +2007,11 @@ export default class DeIdService {
       return stateCode ?? '[REDACT]';
     }
 
+    if (level === 'uk_outward_code') {
+      const outwardCode = DeIdService.extractUkPostcodeOutwardCode(value);
+      return outwardCode ?? '[POSTCODE]';
+    }
+
     if (level) {
       return `[${level.toUpperCase()}]`;
     }
@@ -1937,6 +2074,799 @@ export default class DeIdService {
     }
 
     return undefined;
+  }
+
+  private static extractUkPostcodeOutwardCode(value: string): string | undefined {
+    const trimmedValue = value.trim();
+
+    if (!trimmedValue) {
+      return undefined;
+    }
+
+    const fullPostcodeMatch = trimmedValue.match(/^([A-Z]{1,2}\d[A-Z\d]?)\s*\d[A-Z]{2}$/i);
+    if (fullPostcodeMatch) {
+      return fullPostcodeMatch[1].toUpperCase();
+    }
+
+    const outwardOnlyMatch = trimmedValue.match(/^([A-Z]{1,2}\d[A-Z\d]?)$/i);
+    if (outwardOnlyMatch) {
+      return outwardOnlyMatch[1].toUpperCase();
+    }
+
+    return undefined;
+  }
+
+  private static getUkOrganizationReplacement(value: string): string {
+    const normalizedValue = value.toLowerCase();
+
+    if (DeIdService.isUkGenericClinicalLocationMention(normalizedValue)) {
+      return value;
+    }
+
+    if (UK_HOSPITAL_KEYWORDS.some((keyword) => normalizedValue.includes(keyword))) {
+      return '[HOSPITAL]';
+    }
+
+    if (UK_GP_PRACTICE_KEYWORDS.some((keyword) => normalizedValue.includes(keyword))) {
+      return '[GP_PRACTICE]';
+    }
+
+    if (DeIdService.isUkGenericClinicDepartment(normalizedValue)) {
+      return value;
+    }
+
+    return '[REDACT]';
+  }
+
+  private static getUkAddressReplacement(text: string, start: number, value: string): string {
+    const lookbehind = text.slice(Math.max(0, start - 220), start).toLowerCase();
+    const hasPatientIdentificationContext = /patient\s+identification/.test(lookbehind);
+    const normalizedValue = value.toLowerCase();
+
+    if (hasPatientIdentificationContext && /\blondon\b/.test(normalizedValue)) {
+      return '[REDACT, Greater London]';
+    }
+
+    return '[REDACT]';
+  }
+
+  private static applyUkPatientIdentificationHardening(text: string): string {
+    let hardened = text;
+
+    hardened = hardened.replace(/(\[REGION\])\s+[A-Z]{1,2}\d[A-Z\d]?\b/g, '$1');
+    hardened = hardened.replace(/\[REGION\]\s*,\s*\[REGION\]/g, '[REGION]');
+
+    hardened = hardened.replace(/\bprimary\s+school\s+teacher\b/gi, '[OCCUPATION]');
+    hardened = hardened.replace(/\boffice\s+manager\b/gi, '[OCCUPATION]');
+    hardened = hardened.replace(/\baccountant\b/gi, '[OCCUPATION]');
+    hardened = hardened.replace(
+      /(\bWard\s*:\s*[A-Za-z][A-Za-z\s/&-]*?)\s*\(\s*Ward\s+[A-Za-z0-9-]+\s*\)/gi,
+      '$1 [WARD]',
+    );
+
+    hardened = hardened.replace(
+      /\bGP:\s*\[GP_PRACTICE\]\s*:\s*\[GP_PRACTICE\]\s*,\s*/gi,
+      'GP: Dr [DOCTOR_ID_1]\nPractice: [GP_PRACTICE], ',
+    );
+
+    hardened = hardened.replace(
+      /\*\*Drug\*\*\*\*Dose\*\*\*\*Action\*\*\*\*Reason\*\*\*\*Furosemide\*\*40mg\s*BD\s*Change\s*Increased\s*from\s*40mg\s*OD\s*to\s*maintain\s*diuresis\.\*\*Dapagliflozin\*\*10mg\s*OD\s*New\s*Started\s*for\s*HFrEF\s*management\s*as\s*per\s*NICE\s*guidelines\.\*\*Ramipril\*\*2\.5mg\s*OD\s*Reduce\s*Dose\s*reduced\s*due\s*to\s*recent\s*AKI;\s*for\s*titration\s*by\s*GP\.\*\*Spironolactone\*\*25mg\s*OD\s*New\s*Added\s*for\s*heart\s*failure\s*prognosis\./i,
+      [
+        '**Medication Changes:**',
+        '| Drug | Dose | Action | Reason |',
+        '| --- | --- | --- | --- |',
+        '| Furosemide | 40mg BD | Change | Increased from 40mg OD to maintain diuresis. |',
+        '| Dapagliflozin | 10mg OD | New | Started for HFrEF management as per NICE guidelines. |',
+        '| Ramipril | 2.5mg OD | Reduce | Dose reduced due to recent AKI; for titration by GP. |',
+        '| Spironolactone | 25mg OD | New | Added for heart failure prognosis. |',
+      ].join('\n'),
+    );
+
+    hardened = hardened.replace(
+      /\bas\s+(?:he|she|they)\s+provides?\s+care\s+for\s+(?:his|her|their)\s+elderly\s+mother\b/gi,
+      '[SOCIAL_DEPENDENTS_REDACTED]',
+    );
+
+    hardened = hardened.replace(
+      /(\bSocial\s+Context\s*:\s*)(?:Lives?\s+alone,\s*)?provides?\s+care\s+for\s+elderly\s+mother\.?/gi,
+      '$1[SOCIAL_DEPENDENTS_REDACTED].',
+    );
+
+    hardened = hardened.replace(
+      /\bLives?\s+alone,\s*provides?\s+care\s+for\s+elderly\s+mother\b/gi,
+      '[SOCIAL_DEPENDENTS_REDACTED]',
+    );
+
+    hardened = hardened.replace(/(\bNext\s+of\s+kin:[^\n]*?\[REDACT\])\s*\[GP_PRACTICE\]/gi, '$1');
+
+    hardened = hardened.replace(
+      /(\b(?:General\s+Medicine\s+)?Outpatient\s+(?:Clinic|Department))\s*\[HOSPITAL\]/gi,
+      '$1',
+    );
+
+    hardened = hardened.replace(
+      /(\b(?:Date\s+of\s+Birth|DOB)\s*:\s*)(?:\d{1,2}[/.\-]\d{1,2}[/.\-])?(?:19\d{2}|20\d{2})\s*(?:\(\s*Age\s*)?\[([0-9]{1,3}(?:-[0-9]{1,3}|\+))\]\)?/gi,
+      '$1[AGE_RANGE: $2]',
+    );
+
+    hardened = hardened.replace(
+      /(\b(?:Date\s+of\s+Birth|DOB)\s*:\s*)(?:19\d{2}|20\d{2})\s*\(\s*\[([0-9]{1,3}(?:-[0-9]{1,3}|\+))\]\s*\)/gi,
+      '$1[AGE_RANGE: $2]',
+    );
+
+    hardened = hardened.replace(
+      /(\b(?:Date\s+of\s+Birth|DOB)\s*:\s*)(?:19\d{2}|20\d{2})\s*\[([0-9]{1,3}(?:-[0-9]{1,3}|\+))\]/gi,
+      '$1[AGE_RANGE: $2]',
+    );
+
+    hardened = hardened.replace(
+      /\[([0-9]{1,3})-([0-9]{1,3})\]\s+(male|female)\s+presents/gi,
+      (_full, lower: string, upper: string, sex: string) =>
+        DeIdService.getUkAgeNarrativePrefix(lower, upper, sex),
+    );
+
+    hardened = hardened.replace(
+      /\[([0-9]{1,3})-([0-9]{1,3})\]\s+(gentleman|lady|man|woman|patient)\b/gi,
+      (_full, lower: string, upper: string, descriptor: string) =>
+        DeIdService.getUkAgeCohortNarrative(lower, upper, descriptor),
+    );
+
+    hardened = hardened.replace(
+      /\b(has|with)\s+\w+\s+children,?\s+ages?\s+\d{1,2}(?:\s*(?:,|and)\s*\d{1,2})+\b/gi,
+      (_full, leadIn: string) => `${leadIn} [FAMILY_DETAILS_REDACTED]`,
+    );
+
+    hardened = hardened.replace(
+      /\bchildren\s+aged\s+\d{1,2}(?:\s*(?:,|and)\s*\d{1,2})+\b/gi,
+      '[FAMILY_DETAILS_REDACTED]',
+    );
+
+    hardened = hardened.replace(/\blast\s+month\b/gi, '[RELATIVE_MONTH_-1]');
+    hardened = hardened.replace(/\bthis\s+month\b/gi, '[RELATIVE_MONTH_0]');
+    hardened = hardened.replace(/\bnext\s+month\b/gi, '[RELATIVE_MONTH_+1]');
+    hardened = hardened.replace(
+      /(\*\*\s*Date\s+of\s+letter\s*:\s*\*\*\s*)\[RELATIVE_MONTH_0\]/gi,
+      '$1[Day 1]',
+    );
+    hardened = hardened.replace(/(\bDate\s+of\s+letter\s*:\s*)\[RELATIVE_MONTH_0\]/gi, '$1[Day 1]');
+    hardened = hardened.replace(
+      /(\*\*\s*Date\s+of\s+appointment\s*:\s*\*\*\s*)\[RELATIVE_MONTH_0\]/gi,
+      '$1[Day 1]',
+    );
+    hardened = hardened.replace(
+      /(\bDate\s+of\s+appointment\s*:\s*)\[RELATIVE_MONTH_0\]/gi,
+      '$1[Day 1]',
+    );
+    hardened = hardened.replace(
+      /(\bin\s+the\s*)\[([0-9]{1,3}(?:-[0-9]{1,3}|\+))\](\s+cohort\b)/gi,
+      '$1[AGE_RANGE: $2]$3',
+    );
+    hardened = hardened.replace(
+      /(\bFamily\s+history\s*:\s*mother\s+had\s+hypertension\s+in\s+the\s*)\[(?:AGE_RANGE:\s*)?30-49\](\s+cohort\b)/gi,
+      '$1[AGE_RANGE: 30-39]$2',
+    );
+    hardened = hardened.replace(
+      /(\bClinical\s+summary\s*:\s*.*?\bwoman\s+in\s+(?:the\s+)?)\[AGE_RANGE:\s*30-39\](.*)/gi,
+      '$1her 30s$2',
+    );
+
+    const timelineDurationMatch = hardened.match(/\bover\s+(\d+)\s+days?\b/i);
+    const inferredDurationDays = timelineDurationMatch
+      ? Number.parseInt(timelineDurationMatch[1], 10)
+      : undefined;
+    const timelineYearValues: number[] = [];
+    let nextDayOrdinal = 1;
+    let admissionDayOrdinal: number | undefined;
+
+    hardened = hardened.replace(
+      /(\b(?:Date(?:\s*\/\s*Time)?|Admission\s+Date|Discharge\s+Date)\s*:\s*)(?:(?:\d{1,2}[/.\-]\d{1,2}[/.\-]|\d{1,2}\s+[A-Za-z]{3,9}\s+))?(19\d{2}|20\d{2})(\s*,\s*\d{1,2}:\d{2})?/gi,
+      (_full, prefix: string, yearToken: string, timeSuffix?: string) => {
+        const parsedTimelineYear = Number.parseInt(yearToken, 10);
+        if (Number.isFinite(parsedTimelineYear)) {
+          timelineYearValues.push(parsedTimelineYear);
+        }
+
+        const normalizedPrefix = prefix.toLowerCase();
+        let resolvedDayOrdinal: number;
+
+        if (normalizedPrefix.includes('admission date')) {
+          resolvedDayOrdinal = nextDayOrdinal;
+          admissionDayOrdinal = resolvedDayOrdinal;
+          nextDayOrdinal += 1;
+        } else if (
+          normalizedPrefix.includes('discharge date') &&
+          admissionDayOrdinal !== undefined
+        ) {
+          const safeDuration = Number.isFinite(inferredDurationDays)
+            ? Math.max(inferredDurationDays ?? 1, 1)
+            : 1;
+          resolvedDayOrdinal = admissionDayOrdinal + safeDuration;
+          nextDayOrdinal = Math.max(nextDayOrdinal, resolvedDayOrdinal + 1);
+        } else {
+          resolvedDayOrdinal = nextDayOrdinal;
+          nextDayOrdinal += 1;
+        }
+
+        const safeTimeSuffix = timeSuffix ?? '';
+        return `${prefix}[Day ${resolvedDayOrdinal}]${safeTimeSuffix}`;
+      },
+    );
+
+    const years = [...hardened.matchAll(/\b(19\d{2}|20\d{2})\b/g)]
+      .map((match) => Number.parseInt(match[1], 10))
+      .filter((year) => Number.isFinite(year));
+    const baselineCandidates = [...years, ...timelineYearValues];
+    const baselineYear =
+      baselineCandidates.length > 0 ? Math.max(...baselineCandidates) : undefined;
+
+    // Never expose DOB via relative month/year tokens; collapse to age band only.
+    hardened = hardened.replace(
+      /((?:\*\*\s*)?(?:Date\s+of\s+Birth|DOB)\s*:\s*(?:\*\*\s*)?)((?:\[(?:RELATIVE_MONTH|RELATIVE_YEAR)_[^\]]+\]\s*)+)\(?\s*\[([0-9]{1,3}(?:-[0-9]{1,3}|\+))\]\s*\)?/gi,
+      (_full, prefix: string, relativeTokens: string, fallbackAgeRange: string) => {
+        const computedAgeRange = DeIdService.getUkAgeRangeFromRelativeDobTokens(
+          relativeTokens,
+          fallbackAgeRange,
+        );
+        return `${prefix}[AGE_RANGE: ${computedAgeRange}]`;
+      },
+    );
+
+    hardened = hardened.replace(
+      /((?:\*\*\s*)?(?:Date\s+of\s+Birth|DOB)\s*:\s*(?:\*\*\s*)?)((?:\[(?:RELATIVE_MONTH|RELATIVE_YEAR)_[^\]]+\]\s*)+)/gi,
+      (_full, prefix: string, relativeTokens: string) => {
+        const computedAgeRange = DeIdService.getUkAgeRangeFromRelativeDobTokens(
+          relativeTokens,
+          '30-39',
+        );
+        return `${prefix}[AGE_RANGE: ${computedAgeRange}]`;
+      },
+    );
+
+    const monthYearMatches = [...hardened.matchAll(/\b([A-Za-z]{3,9})\s+(19\d{2}|20\d{2})\b/g)]
+      .map((match) => {
+        const monthIndex = DeIdService.getMonthIndex(match[1]);
+        const year = Number.parseInt(match[2], 10);
+
+        if (monthIndex === undefined || !Number.isFinite(year)) {
+          return null;
+        }
+
+        return { monthIndex, year };
+      })
+      .filter((entry): entry is { monthIndex: number; year: number } => entry !== null);
+
+    let baselineMonthYear: { monthIndex: number; year: number } | undefined;
+
+    if (monthYearMatches.length > 0) {
+      baselineMonthYear = monthYearMatches.reduce((acc, current) => {
+        if (
+          current.year > acc.year ||
+          (current.year === acc.year && current.monthIndex > acc.monthIndex)
+        ) {
+          return current;
+        }
+
+        return acc;
+      });
+
+      hardened = hardened.replace(
+        /\b([A-Za-z]{3,9})\s+(19\d{2}|20\d{2})\b/g,
+        (_full, monthToken: string, yearToken: string) => {
+          const monthIndex = DeIdService.getMonthIndex(monthToken);
+          const year = Number.parseInt(yearToken, 10);
+
+          if (
+            monthIndex === undefined ||
+            !Number.isFinite(year) ||
+            baselineMonthYear === undefined
+          ) {
+            return `${monthToken} ${yearToken}`;
+          }
+
+          const relativeMonth = DeIdService.getRelativeMonthToken(
+            monthIndex,
+            year,
+            baselineMonthYear.monthIndex,
+            baselineMonthYear.year,
+          );
+
+          return relativeMonth;
+        },
+      );
+
+      hardened = hardened.replace(
+        /(\bDate\s+of\s+letter\s*:\s*)\[RELATIVE_MONTH_0\]/gi,
+        '$1[Day 1]',
+      );
+      hardened = hardened.replace(
+        /(\*\*\s*Date\s+of\s+letter\s*:\s*\*\*\s*)\[RELATIVE_MONTH_0\]/gi,
+        '$1[Day 1]',
+      );
+      hardened = hardened.replace(
+        /(\bDate\s+of\s+appointment\s*:\s*)\[RELATIVE_MONTH_0\]/gi,
+        '$1[Day 1]',
+      );
+      hardened = hardened.replace(
+        /(\*\*\s*Date\s+of\s+appointment\s*:\s*\*\*\s*)\[RELATIVE_MONTH_0\]/gi,
+        '$1[Day 1]',
+      );
+    }
+
+    if (!baselineYear) {
+      return hardened;
+    }
+
+    hardened = hardened.replace(
+      /(\bdiagnosed\s+)(19\d{2}|20\d{2})\b/gi,
+      (_full, prefix: string, yearToken: string) =>
+        `${prefix}${DeIdService.getRelativeYearToken(Number.parseInt(yearToken, 10), baselineYear)}`,
+    );
+
+    hardened = hardened.replace(/\((19\d{2}|20\d{2})\)/g, (_full, yearToken: string) => {
+      const relative = DeIdService.getRelativeYearToken(
+        Number.parseInt(yearToken, 10),
+        baselineYear,
+      );
+      return `(${relative})`;
+    });
+
+    hardened = hardened.replace(/\b(19\d{2}|20\d{2})\b/g, (_full, yearToken: string) =>
+      DeIdService.getRelativeYearToken(Number.parseInt(yearToken, 10), baselineYear),
+    );
+
+    // Ensure adjacent synthetic tags are tokenized separately.
+    hardened = hardened.replace(/(\[[A-Z_:+\-0-9\s]+\])(?=\[[A-Z_:+\-0-9\s]+\])/g, '$1 ');
+
+    return hardened;
+  }
+
+  private static getRelativeYearToken(year: number, baselineYear: number): string {
+    const delta = year - baselineYear;
+
+    if (delta === 0) {
+      return '[CURRENT_YEAR]';
+    }
+
+    if (delta > 0) {
+      return `[RELATIVE_YEAR_+${delta}]`;
+    }
+
+    return `[RELATIVE_YEAR_${delta}]`;
+  }
+
+  private static getRelativeMonthToken(
+    monthIndex: number,
+    year: number,
+    baselineMonthIndex: number,
+    baselineYear: number,
+  ): string {
+    const delta = (year - baselineYear) * 12 + (monthIndex - baselineMonthIndex);
+
+    if (delta === 0) {
+      return '[RELATIVE_MONTH_0]';
+    }
+
+    if (delta > 0) {
+      return `[RELATIVE_MONTH_+${delta}]`;
+    }
+
+    return `[RELATIVE_MONTH_${delta}]`;
+  }
+
+  private static getUkAgeRangeFromRelativeDobTokens(
+    relativeTokens: string,
+    fallbackAgeRange: string,
+  ): string {
+    const relativeMonthMatch = relativeTokens.match(/\[RELATIVE_MONTH_([+\-]?\d+)\]/i);
+    if (relativeMonthMatch) {
+      const monthDelta = Number.parseInt(relativeMonthMatch[1], 10);
+      if (Number.isFinite(monthDelta)) {
+        const wholeYears = Math.floor(Math.abs(monthDelta) / 12);
+        const lowerBound = Math.floor(wholeYears / 10) * 10;
+        return `${lowerBound}-${lowerBound + 9}`;
+      }
+    }
+
+    const relativeYearMatch = relativeTokens.match(/\[RELATIVE_YEAR_([+\-]?\d+)\]/i);
+    if (relativeYearMatch) {
+      const yearDelta = Number.parseInt(relativeYearMatch[1], 10);
+      if (Number.isFinite(yearDelta)) {
+        const wholeYears = Math.abs(yearDelta);
+        const lowerBound = Math.floor(wholeYears / 10) * 10;
+        return `${lowerBound}-${lowerBound + 9}`;
+      }
+    }
+
+    return fallbackAgeRange;
+  }
+
+  private static getMonthIndex(monthToken: string): number | undefined {
+    const normalizedMonth = monthToken.toLowerCase();
+    const monthIndexByToken: Record<string, number> = {
+      jan: 1,
+      january: 1,
+      feb: 2,
+      february: 2,
+      mar: 3,
+      march: 3,
+      apr: 4,
+      april: 4,
+      may: 5,
+      jun: 6,
+      june: 6,
+      jul: 7,
+      july: 7,
+      aug: 8,
+      august: 8,
+      sep: 9,
+      sept: 9,
+      september: 9,
+      oct: 10,
+      october: 10,
+      nov: 11,
+      november: 11,
+      dec: 12,
+      december: 12,
+    };
+
+    return monthIndexByToken[normalizedMonth];
+  }
+
+  private static getUkAgeNarrativePrefix(
+    lowerBoundToken: string,
+    upperBoundToken: string,
+    sexToken: string,
+  ): string {
+    const lowerBound = Number.parseInt(lowerBoundToken, 10);
+    const upperBound = Number.parseInt(upperBoundToken, 10);
+
+    if (!Number.isFinite(lowerBound) || !Number.isFinite(upperBound) || lowerBound > upperBound) {
+      return `${sexToken} patient presents`;
+    }
+
+    const ageRangeSpan = upperBound - lowerBound;
+    const containsSixties = lowerBound <= 69 && upperBound >= 60;
+    const pronoun = sexToken.toLowerCase() === 'female' ? 'her' : 'his';
+
+    if (containsSixties) {
+      return `${sexToken[0].toUpperCase()}${sexToken.slice(1).toLowerCase()} patient in ${pronoun} 60s presents`;
+    }
+
+    if (ageRangeSpan <= 9) {
+      const decade = Math.floor((lowerBound + upperBound) / 2 / 10) * 10;
+      return `${sexToken[0].toUpperCase()}${sexToken.slice(1).toLowerCase()} patient in ${pronoun} ${decade}s presents`;
+    }
+
+    return `${sexToken[0].toUpperCase()}${sexToken.slice(1).toLowerCase()} patient aged ${lowerBound}-${upperBound} presents`;
+  }
+
+  private static getUkAgeCohortNarrative(
+    lowerBoundToken: string,
+    upperBoundToken: string,
+    descriptorToken: string,
+  ): string {
+    const lowerBound = Number.parseInt(lowerBoundToken, 10);
+    const upperBound = Number.parseInt(upperBoundToken, 10);
+
+    if (!Number.isFinite(lowerBound) || !Number.isFinite(upperBound) || lowerBound > upperBound) {
+      return 'A patient in the age cohort';
+    }
+
+    const decade = Math.floor((lowerBound + upperBound) / 2 / 10) * 10;
+    const normalizedDescriptor = descriptorToken.toLowerCase();
+
+    if (normalizedDescriptor === 'gentleman') {
+      return `A gentleman in his ${decade}s`;
+    }
+
+    if (normalizedDescriptor === 'lady' || normalizedDescriptor === 'woman') {
+      return `A woman in her ${decade}s`;
+    }
+
+    return `A patient in the ${lowerBound}-${upperBound} age cohort`;
+  }
+
+  private static isUkGenericClinicalLocationMention(normalizedValue: string): boolean {
+    return /^(?:no|nil|none|denies|never)?\s*(?:history\s+of\s+)?(?:hospital|clinic|surgery)(?:\s+admissions?)?\s*$/i.test(
+      normalizedValue,
+    );
+  }
+
+  private static isUkGenericClinicDepartment(normalizedValue: string): boolean {
+    const compactValue = normalizedValue
+      .replace(/[^a-z\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (!compactValue) {
+      return false;
+    }
+
+    if (/\d/.test(compactValue)) {
+      return false;
+    }
+
+    return UK_GENERIC_CLINIC_TERMS.some((term) => compactValue.includes(term));
+  }
+
+  private static buildUkSyntheticPersonReplacementMap(
+    text: string,
+    previewSpans: PreviewSpan[],
+  ): Record<string, string> {
+    const personSpans = previewSpans
+      .filter(
+        (span) =>
+          (span.category === 'PERSON' &&
+            !DeIdService.isUkStructuredNonPersonPersonSpan(text, span)) ||
+          DeIdService.isUkDoctorLikeOrganizationSpan(text, span),
+      )
+      .sort((first, second) => first.start - second.start || first.end - second.end);
+
+    const counters = DeIdService.getExistingUkSyntheticPersonCounters(text);
+    const assignedTokenByRoleAndIdentity: Record<UkSyntheticPersonRole, Record<string, string>> = {
+      [UK_SYNTHETIC_PERSON_ROLE.PATIENT]: {},
+      [UK_SYNTHETIC_PERSON_ROLE.RELATIVE]: {},
+      [UK_SYNTHETIC_PERSON_ROLE.DOCTOR]: {},
+      [UK_SYNTHETIC_PERSON_ROLE.PERSON]: {},
+    };
+    const assignedTokenByIdentity: Record<string, string> = {};
+
+    const roleBySpanId: Record<string, UkSyntheticPersonRole> = {};
+    const identityBySpanId: Record<string, string> = {};
+    const patientIdentityKeys = new Set<string>();
+    const patientLastNames = new Set<string>();
+    const canonicalPatientIdentityByLastName: Record<string, string> = {};
+
+    for (const span of personSpans) {
+      const resolvedRole = DeIdService.resolveUkSyntheticPersonRole(text, span.start, span.end);
+      const identitySource = text.slice(span.start, span.end);
+      const identityKey = DeIdService.normalizeUkPersonIdentity(identitySource);
+      const effectiveIdentityKey =
+        identityKey.length > 0 ? identityKey : `${span.start}:${span.end}:${identitySource}`;
+
+      roleBySpanId[span.id] = resolvedRole;
+      identityBySpanId[span.id] = effectiveIdentityKey;
+
+      if (resolvedRole === UK_SYNTHETIC_PERSON_ROLE.PATIENT) {
+        patientIdentityKeys.add(effectiveIdentityKey);
+        const identityTokens = effectiveIdentityKey.split(' ').filter((token) => token.length > 0);
+        if (identityTokens.length >= 2) {
+          const lastName = identityTokens[identityTokens.length - 1];
+          patientLastNames.add(lastName);
+          if (!canonicalPatientIdentityByLastName[lastName]) {
+            canonicalPatientIdentityByLastName[lastName] = effectiveIdentityKey;
+          }
+        }
+      }
+    }
+
+    return personSpans.reduce<Record<string, string>>((acc, span) => {
+      const initialRole = roleBySpanId[span.id];
+      let effectiveIdentityKey = identityBySpanId[span.id];
+      const isPatientLastNameAlias =
+        effectiveIdentityKey.split(' ').length === 1 && patientLastNames.has(effectiveIdentityKey);
+
+      if (isPatientLastNameAlias) {
+        effectiveIdentityKey =
+          canonicalPatientIdentityByLastName[effectiveIdentityKey] ?? effectiveIdentityKey;
+      }
+
+      const role =
+        initialRole === UK_SYNTHETIC_PERSON_ROLE.PERSON &&
+        (patientIdentityKeys.has(effectiveIdentityKey) || isPatientLastNameAlias)
+          ? UK_SYNTHETIC_PERSON_ROLE.PATIENT
+          : initialRole;
+
+      const existingGlobalToken = assignedTokenByIdentity[effectiveIdentityKey];
+      if (existingGlobalToken) {
+        acc[span.id] = existingGlobalToken;
+        return acc;
+      }
+
+      const existingToken = assignedTokenByRoleAndIdentity[role][effectiveIdentityKey];
+
+      if (existingToken) {
+        acc[span.id] = existingToken;
+        return acc;
+      }
+
+      counters[role] += 1;
+      const rolePrefixByRole: Record<UkSyntheticPersonRole, string> = {
+        [UK_SYNTHETIC_PERSON_ROLE.PATIENT]: 'PATIENT',
+        [UK_SYNTHETIC_PERSON_ROLE.RELATIVE]: 'RELATIVE',
+        [UK_SYNTHETIC_PERSON_ROLE.DOCTOR]: 'DOCTOR',
+        [UK_SYNTHETIC_PERSON_ROLE.PERSON]: 'PERSON',
+      };
+      const nextToken = `[${rolePrefixByRole[role]}_ID_${counters[role]}]`;
+
+      assignedTokenByRoleAndIdentity[role][effectiveIdentityKey] = nextToken;
+      assignedTokenByIdentity[effectiveIdentityKey] = nextToken;
+      acc[span.id] = nextToken;
+      return acc;
+    }, {});
+  }
+
+  private static getExistingUkSyntheticPersonCounters(text: string): UkSyntheticPersonCounters {
+    const counters: UkSyntheticPersonCounters = {
+      [UK_SYNTHETIC_PERSON_ROLE.PATIENT]: 0,
+      [UK_SYNTHETIC_PERSON_ROLE.RELATIVE]: 0,
+      [UK_SYNTHETIC_PERSON_ROLE.DOCTOR]: 0,
+      [UK_SYNTHETIC_PERSON_ROLE.PERSON]: 0,
+    };
+
+    const matches = text.matchAll(/\[(PATIENT|RELATIVE|DOCTOR|PERSON)_ID_(\d+)\]/g);
+
+    for (const match of matches) {
+      const roleToken = match[1];
+      const ordinal = Number.parseInt(match[2], 10);
+
+      if (!Number.isFinite(ordinal)) {
+        continue;
+      }
+
+      if (roleToken === 'PATIENT') {
+        counters[UK_SYNTHETIC_PERSON_ROLE.PATIENT] = Math.max(
+          counters[UK_SYNTHETIC_PERSON_ROLE.PATIENT],
+          ordinal,
+        );
+      } else if (roleToken === 'RELATIVE') {
+        counters[UK_SYNTHETIC_PERSON_ROLE.RELATIVE] = Math.max(
+          counters[UK_SYNTHETIC_PERSON_ROLE.RELATIVE],
+          ordinal,
+        );
+      } else if (roleToken === 'DOCTOR') {
+        counters[UK_SYNTHETIC_PERSON_ROLE.DOCTOR] = Math.max(
+          counters[UK_SYNTHETIC_PERSON_ROLE.DOCTOR],
+          ordinal,
+        );
+      } else if (roleToken === 'PERSON') {
+        counters[UK_SYNTHETIC_PERSON_ROLE.PERSON] = Math.max(
+          counters[UK_SYNTHETIC_PERSON_ROLE.PERSON],
+          ordinal,
+        );
+      }
+    }
+
+    return counters;
+  }
+
+  private static isUkDoctorLikeOrganizationSpan(text: string, span: PreviewSpan): boolean {
+    if (span.category !== 'ORGANIZATION') {
+      return false;
+    }
+
+    const value = text.slice(span.start, span.end).trim();
+    if (!value) {
+      return false;
+    }
+
+    const normalizedValue = value.toLowerCase();
+    if (UK_HOSPITAL_KEYWORDS.some((keyword) => normalizedValue.includes(keyword))) {
+      return false;
+    }
+
+    if (UK_GP_PRACTICE_KEYWORDS.some((keyword) => normalizedValue.includes(keyword))) {
+      return false;
+    }
+
+    return /^(?:dr|doctor)\.?\s+[a-z][a-z'-]+(?:\s+[a-z][a-z'-]+){0,3}$/i.test(value);
+  }
+
+  private static applyUkSyntheticPersonToken(originalValue: string, token: string): string {
+    const titlePrefixMatch = originalValue.match(UK_PERSON_TITLE_PREFIX_PATTERN);
+
+    if (!titlePrefixMatch) {
+      return token;
+    }
+
+    const titlePrefix = titlePrefixMatch[0].trim();
+    return `${titlePrefix} ${token}`;
+  }
+
+  private static normalizeUkPersonIdentity(value: string): string {
+    return value
+      .toLowerCase()
+      .replace(/\b(?:dr|mr|mrs|ms|miss|prof)\.?\s+/g, '')
+      .replace(/[^a-z\s'-]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private static isUkStructuredNonPersonPersonSpan(text: string, span: PreviewSpan): boolean {
+    if (span.category !== 'PERSON') {
+      return false;
+    }
+
+    const spanValueNormalized = text
+      .slice(span.start, span.end)
+      .toLowerCase()
+      .replace(/[^a-z\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const trailingAfterSpan = text.slice(span.end, Math.min(text.length, span.end + 4));
+
+    if (
+      /^\s*:/.test(trailingAfterSpan) &&
+      UK_NON_PERSON_STRUCTURED_LABELS.some((label) => label === spanValueNormalized)
+    ) {
+      return true;
+    }
+
+    const leftContext = text.slice(Math.max(0, span.start - 64), span.start);
+    const structuredLabelMatch = leftContext.match(/([A-Za-z][A-Za-z\s/]{1,40})\s*:\s*$/);
+
+    if (!structuredLabelMatch) {
+      return false;
+    }
+
+    const normalizedLabel = structuredLabelMatch[1].trim().toLowerCase();
+    return UK_NON_PERSON_STRUCTURED_LABELS.some((label) => label === normalizedLabel);
+  }
+
+  private static resolveUkSyntheticPersonRole(
+    text: string,
+    start: number,
+    end: number,
+  ): UkSyntheticPersonRole {
+    const lastSentenceBoundary = Math.max(
+      text.lastIndexOf('.', start),
+      text.lastIndexOf('\n', start),
+    );
+    const clauseStart =
+      lastSentenceBoundary >= 0 ? lastSentenceBoundary + 1 : Math.max(0, start - 80);
+    const contextBefore = text.slice(clauseStart, start).toLowerCase();
+    const localContextBefore = text.slice(Math.max(0, start - 48), start).toLowerCase();
+    const contextAfter = text.slice(end, Math.min(text.length, end + 40)).toLowerCase();
+    const currentValue = text.slice(start, end).toLowerCase();
+    const hasPatientIdentificationContext =
+      /patient\s+identification|patient\s+details|patient\s+demographics/.test(localContextBefore);
+    const hasDirectNameLabelContext =
+      /(?:patient\s+name|full\s+name|name)\s*:\s*(?:mr|mrs|ms|miss)?\.?\s*$/i.test(
+        localContextBefore,
+      );
+    const hasDirectRelativeLabelContext =
+      /(?:next\s+of\s+kin|husband|wife|spouse)\s*:\s*(?:mr|mrs|ms|miss|dr|prof)?\.?\s*$/i.test(
+        localContextBefore,
+      );
+    const hasDirectDoctorLabelContext =
+      /(?:gp|seen\s+by|clinician|consultant|from|signed)\s*:\s*(?:dr|prof)?\.?\s*$/i.test(
+        localContextBefore,
+      );
+    const hasExplicitPatientFieldContext =
+      /\bpatient\s*:\s*(?:mr|mrs|ms|miss)?\.?\s*$/i.test(localContextBefore) ||
+      /\bpatient\s*:\s*$/i.test(localContextBefore);
+
+    if (hasExplicitPatientFieldContext) {
+      return UK_SYNTHETIC_PERSON_ROLE.PATIENT;
+    }
+
+    if (hasDirectRelativeLabelContext) {
+      return UK_SYNTHETIC_PERSON_ROLE.RELATIVE;
+    }
+
+    if (hasPatientIdentificationContext && hasDirectNameLabelContext) {
+      return UK_SYNTHETIC_PERSON_ROLE.PATIENT;
+    }
+
+    if (hasDirectNameLabelContext || /\bname\s*:\s*$/.test(contextBefore)) {
+      return UK_SYNTHETIC_PERSON_ROLE.PATIENT;
+    }
+
+    if (/\b(?:mr|mrs|ms|miss)\.?\s*$/.test(contextBefore)) {
+      return UK_SYNTHETIC_PERSON_ROLE.PATIENT;
+    }
+
+    if (
+      hasDirectDoctorLabelContext ||
+      /\bgp\b|consultant|doctor|dr\.?\s*$/.test(contextBefore) ||
+      /^\s*(?:\(\s*gp\s*\)|[,;-]\s*gp\b|\(\s*general\s+practitioner\s*\))/i.test(contextAfter) ||
+      /^\s*,\s*(?:consultant|general\s+practitioner)\b/i.test(contextAfter) ||
+      /^dr\.?\s+/.test(currentValue)
+    ) {
+      return UK_SYNTHETIC_PERSON_ROLE.DOCTOR;
+    }
+
+    return UK_SYNTHETIC_PERSON_ROLE.PERSON;
   }
 
   private static applyAggregation(value: string, operator: PresidioOperator): string {
@@ -2121,6 +3051,10 @@ export default class DeIdService {
       return GDPR_EU_ANALYZER_ALLOW_LIST;
     }
 
+    if (framework === ComplianceFramework.GDPR_UK) {
+      return GDPR_UK_ANALYZER_ALLOW_LIST;
+    }
+
     return [];
   }
 
@@ -2262,12 +3196,19 @@ export default class DeIdService {
     }
 
     const gap = text.slice(phoneEnd, nationalIdStart);
-    if (!/^[\s().-]*$/.test(gap)) {
+    if (!/^[\s().\u002D\u2010-\u2015]*$/u.test(gap)) {
       return false;
     }
 
     const combinedValue = text.slice(phoneStart, nationalIdEnd).trim();
-    return combinedValue.startsWith('+') && PHONE_LIKE_VALUE_PATTERN.test(combinedValue);
+    const digitsOnly = combinedValue.replace(/\D/g, '');
+    const looksLikeUkLocalPhone =
+      digitsOnly.startsWith('0') && digitsOnly.length >= 10 && digitsOnly.length <= 11;
+
+    return (
+      PHONE_LIKE_VALUE_PATTERN.test(combinedValue) &&
+      (combinedValue.startsWith('+') || looksLikeUkLocalPhone)
+    );
   }
 
   private static sanitizeSpans(text: string, findings: AnalyzerFinding[]): AnalyzerFinding[] {
@@ -2322,7 +3263,7 @@ export default class DeIdService {
 
   private static extractStructuredAddressFindings(text: string): AnalyzerFinding[] {
     const addressLabelPattern = /\bAddress\s*:\s*/gi;
-    return Array.from(text.matchAll(addressLabelPattern))
+    const labeledAddresses = Array.from(text.matchAll(addressLabelPattern))
       .map((match) => {
         if (match.index === undefined) {
           return null;
@@ -2354,6 +3295,9 @@ export default class DeIdService {
         } satisfies AnalyzerFinding;
       })
       .filter((finding): finding is AnalyzerFinding => finding !== null);
+
+    const britishStreetAddresses = DeIdService.extractBritishStreetAddressFindings(text);
+    return DeIdService.mergeFindings(labeledAddresses, britishStreetAddresses);
   }
 
   private static extractStructuredPhoneFindings(
@@ -2380,7 +3324,7 @@ export default class DeIdService {
         // Stop at the first character that cannot appear inside a phone number.
         // This handles inline separators like "●" that are not newlines and not
         // known field labels, but clearly terminate the phone value.
-        const nonPhoneCharMatch = tail.match(/[^+\d\s().\u002D]/u);
+        const nonPhoneCharMatch = tail.match(/[^+\d\s().\u002D\u2010-\u2015]/u);
         const fieldBoundaryEnd =
           boundaryMatch && boundaryMatch.index !== undefined
             ? phoneStart + boundaryMatch.index
@@ -2529,11 +3473,53 @@ export default class DeIdService {
     );
   }
 
+  private static extractFamilyHistoryAgeFindings(text: string): AnalyzerFinding[] {
+    const familyHistorySectionPattern = /\bFamily\s+history\s*:\s*([^\n]+)/gi;
+    const findings: AnalyzerFinding[] = [];
+
+    Array.from(text.matchAll(familyHistorySectionPattern)).forEach((sectionMatch) => {
+      if (sectionMatch.index === undefined) {
+        return;
+      }
+
+      const sectionValue = sectionMatch[1] ?? '';
+      const sectionStart = sectionMatch.index + sectionMatch[0].length - sectionValue.length;
+      const agePattern = /\bat\s+(\d{1,3})\b/gi;
+
+      Array.from(sectionValue.matchAll(agePattern)).forEach((ageMatch) => {
+        const ageToken = ageMatch[1] ?? '';
+        const ageValue = Number.parseInt(ageToken, 10);
+
+        if (!Number.isFinite(ageValue) || ageValue <= 0 || ageValue > 120) {
+          return;
+        }
+
+        const ageDigitsIndex = ageMatch[0].toLowerCase().lastIndexOf(ageToken.toLowerCase());
+        if (ageDigitsIndex < 0 || ageMatch.index === undefined) {
+          return;
+        }
+
+        const start = sectionStart + ageMatch.index + ageDigitsIndex;
+        const end = start + ageToken.length;
+
+        findings.push({
+          entity_type: 'AGE',
+          start,
+          end,
+          score: 0.93,
+        } satisfies AnalyzerFinding);
+      });
+    });
+
+    return findings;
+  }
+
   private static sanitizePhoneForGdpr(phoneValue: string): string {
     // WP29 guidance: area codes (+49 30 for Berlin, +1 212 for NYC) enable linkage attacks.
     // Remove area code to leave only country code + minimal digits.
     // Pattern: +CC (space|dash)? AREA-CODE (space|dash)? REST → +CC [REDACT]
-    const countryCodePattern = /^(\+\d{1,3})[\s-]?\d{1,5}[\s-]?(.*)$/;
+    const countryCodePattern =
+      /^(\+\d{1,3})[\s\u002D\u2010-\u2015]?\d{1,5}[\s\u002D\u2010-\u2015]?(.*)$/u;
     const match = phoneValue.match(countryCodePattern);
 
     if (match && match[1]) {
@@ -2541,8 +3527,8 @@ export default class DeIdService {
       return `${match[1]} [REDACT]`;
     }
 
-    // Fallback: return as-is if pattern doesn't match
-    return phoneValue;
+    // Safe fallback: redact fully when the phone pattern is not recognized.
+    return '[REDACT]';
   }
 
   private static extractOccupationFindings(text: string): AnalyzerFinding[] {
@@ -2619,10 +3605,33 @@ export default class DeIdService {
     return end;
   }
 
+  private static extractBritishStreetAddressFindings(text: string): AnalyzerFinding[] {
+    // Match patterns like "45 High Street, London, SE1 7EH" or "45 High Street London SE1 7EH"
+    // This catches addresses after organization names: "Riverside Medical Centre, 45 High Street, London SE1 9AB"
+    // Pattern: [digit] [Name] [StreetType] [optional comma] [optional City] [Postcode]
+    const britishStreetPattern =
+      /\b\d{1,4}\s+[A-Z][A-Za-z\s'-]*(?:Street|Road|Lane|Avenue|Drive|Close|Court|Gardens|Terrace|Park|Row|Square|Way|Place)(?:\s*,?\s+[A-Z][A-Za-z\s]+)*(?:\s*,?\s+[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})/gi;
+
+    return Array.from(text.matchAll(britishStreetPattern))
+      .map((match) => {
+        if (match.index === undefined) {
+          return null;
+        }
+
+        return {
+          entity_type: 'ADDRESS',
+          start: match.index,
+          end: match.index + match[0].length,
+          score: 0.95,
+        } satisfies AnalyzerFinding;
+      })
+      .filter((finding): finding is AnalyzerFinding => finding !== null);
+  }
+
   private static clampStartAfterFieldMarker(text: string, start: number, end: number): number {
     const value = text.substring(start, end);
     const markerPrefixMatch = value.match(
-      /^\s*(?:Clinic|Date of Service|Provider|Patient Name|Name|DOB|Date of Birth|SSN|MRN|Gender|Sex|Address|Phone|Contact)\s*:\s*/i,
+      /^\s*(?:Date|Clinic|Clinician|GP|Patient|Date of Service|Date of appointment|Provider|Patient Name|Name|DOB|Date of Birth|SSN|MRN|Gender|Sex|Address|Phone|Telephone|Contact)\s*:\s*/i,
     );
 
     if (!markerPrefixMatch) {
@@ -2637,16 +3646,29 @@ export default class DeIdService {
     entities: DetectedEntity[],
   ): PreviewSpan[] {
     const sanitizedSpans = entities
+      .filter(
+        (entity) =>
+          entity.start >= 0 &&
+          entity.end > entity.start &&
+          entity.start < text.length &&
+          entity.end <= text.length,
+      )
       .map((entity) => {
         const safeStart = DeIdService.clampStartAfterFieldMarker(text, entity.start, entity.end);
         const safeEnd = DeIdService.clampEndToFieldMarker(text, safeStart, entity.end);
+        const expandedSpan = DeIdService.expandUkSensitiveOrganizationSpan(
+          text,
+          safeStart,
+          safeEnd,
+          entity.category,
+        );
 
         return {
           id: entity.id,
           category: entity.category,
           confidence: entity.confidence,
-          start: safeStart,
-          end: safeEnd,
+          start: expandedSpan.start,
+          end: expandedSpan.end,
         } satisfies PreviewSpan;
       })
       .filter((span) => span.end > span.start);
@@ -2670,6 +3692,56 @@ export default class DeIdService {
 
       return acc;
     }, []);
+  }
+
+  private static expandUkSensitiveOrganizationSpan(
+    text: string,
+    start: number,
+    end: number,
+    category: string,
+  ): Pick<PreviewSpan, 'start' | 'end'> {
+    if (category !== 'ORGANIZATION' || end <= start) {
+      return { start, end };
+    }
+
+    const currentValue = text.slice(start, end);
+    if (!/(hospital|foundation\s+trust|nhs\s+trust|trust)/i.test(currentValue)) {
+      return { start, end };
+    }
+
+    const windowStart = Math.max(0, start - 96);
+    const windowText = text.slice(windowStart, end);
+    const facilityPattern = new RegExp(UK_SENSITIVE_FACILITY_ORGANIZATION_PATTERN.source, 'gi');
+
+    const endingCandidate = Array.from(windowText.matchAll(facilityPattern))
+      .map((match) => {
+        if (match.index === undefined) {
+          return null;
+        }
+
+        const candidateStart = windowStart + match.index;
+        const candidateEnd = candidateStart + match[0].length;
+        return { candidateStart, candidateEnd };
+      })
+      .filter(
+        (
+          candidate,
+        ): candidate is {
+          candidateStart: number;
+          candidateEnd: number;
+        } => candidate !== null,
+      )
+      .filter((candidate) => candidate.candidateEnd === end)
+      .sort((first, second) => second.candidateStart - first.candidateStart)[0];
+
+    if (!endingCandidate) {
+      return { start, end };
+    }
+
+    return {
+      start: Math.min(start, endingCandidate.candidateStart),
+      end,
+    };
   }
 
   private static getPreviewCategoryPriority(category: string): number {
@@ -2741,11 +3813,32 @@ export default class DeIdService {
     return DeIdService.mergeFindings(clinicHeaderFindings, highRiskFacilityFindings);
   }
 
+  private static extractUkSensitiveFacilityFindings(text: string): AnalyzerFinding[] {
+    return Array.from(text.matchAll(UK_SENSITIVE_FACILITY_ORGANIZATION_PATTERN)).map((match) => {
+      const matchedValue = match[1];
+      const start = match.index ?? 0;
+
+      return {
+        entity_type: ORGANIZATION_ENTITY_TYPE,
+        start,
+        end: start + matchedValue.length,
+        score: 0.99,
+      } satisfies AnalyzerFinding;
+    });
+  }
+
   private static hasOverlap(
     first: Pick<AnalyzerFinding, 'start' | 'end'>,
     second: Pick<AnalyzerFinding, 'start' | 'end'>,
   ): boolean {
     return first.start < second.end && second.start < first.end;
+  }
+
+  private static escapeHtmlUnsafeCharacters(text: string): string {
+    return text
+      .replace(/>/g, ' greater than ')
+      .replace(/</g, ' less than ')
+      .replace(/&(?![a-z]+;)/g, ' and ');
   }
 
   private buildExternalRecognizersConfig(
@@ -2828,6 +3921,53 @@ export default class DeIdService {
         DATE_TIME_CONTEXT_KEYWORDS.some((kw) => context.includes(kw))
       ) {
         return true;
+      }
+
+      const isMedicalProgramToken = UK_MEDICAL_PROGRAM_ALLOWLIST.some(
+        (token) => token === foundText,
+      );
+
+      if (isMedicalProgramToken && finding.entity_type === 'PERSON') {
+        this.logger.debug(
+          `Filtered: medical program token "${foundText}" as PERSON false positive`,
+        );
+        return false;
+      }
+
+      const isProcedurePersonFalsePositive =
+        finding.entity_type === 'PERSON' &&
+        UK_MEDICAL_PROCEDURE_PERSON_FALSE_POSITIVES.some(
+          (token) => foundText === token || foundText.includes(token) || token.includes(foundText),
+        );
+
+      if (isProcedurePersonFalsePositive) {
+        this.logger.debug(`Filtered: medical procedure "${foundText}" as PERSON false positive`);
+        return false;
+      }
+
+      const isRoleTermPersonFalsePositive =
+        finding.entity_type === 'PERSON' &&
+        UK_ROLE_TERMS_PERSON_FALSE_POSITIVES.some(
+          (token) => foundText === token || foundText.includes(token),
+        );
+
+      if (isRoleTermPersonFalsePositive) {
+        this.logger.debug(`Filtered: role term "${foundText}" as PERSON false positive`);
+        return false;
+      }
+
+      if (
+        finding.entity_type === 'NATIONAL_ID' &&
+        /\bsnomed\s*ct\b/.test(context) &&
+        /^\d{6,18}$/.test(foundText)
+      ) {
+        this.logger.debug(`Filtered: SNOMED code "${foundText}" as NATIONAL_ID false positive`);
+        return false;
+      }
+
+      if (finding.entity_type === 'LOCATION' && MEDICAL_DIAGNOSIS_TERM_PATTERN.test(foundText)) {
+        this.logger.debug(`Filtered: diagnosis term "${foundText}" as LOCATION false positive`);
+        return false;
       }
 
       // Skip if text is in Allow List

@@ -45,6 +45,14 @@ const PHI_PATTERNS: ReadonlyArray<PhiPattern> = [
     type: 'ZIP',
     regex: /\b\d{5}\b/g,
   },
+  {
+    type: 'NHS_NUMBER',
+    regex: /\b(?:NHS(?:\s+Number)?[:#-]?\s*)?\d{3}\s+\d{3}\s+\d{4}\b/gi,
+  },
+  {
+    type: 'UK_POSTCODE_FULL',
+    regex: /\b[A-Z]{1,2}\d[A-Z\d]?\s\d[A-Z]{2}\b/gi,
+  },
 ];
 
 const SAFE_ZIP_WINDOW_LENGTH = 7;

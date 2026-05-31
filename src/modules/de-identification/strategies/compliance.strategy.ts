@@ -170,6 +170,7 @@ const GDPR_UK_STRATEGY: ComplianceStrategy = {
   mode: 'flexible',
   entities: {
     ...GDPR_EU_STRATEGY.entities,
+    EMAIL_ADDRESS: createEntityStrategy([{ type: 'mask', params: { redactDomain: true } }]),
     RACE: createEntityStrategy([{ type: 'redact' }], { riskLevel: 'high' }),
     RELIGION: createEntityStrategy([{ type: 'redact' }], { riskLevel: 'high' }),
     POLITICAL_VIEWS: createEntityStrategy([{ type: 'redact' }], { riskLevel: 'high' }),
@@ -180,10 +181,14 @@ const GDPR_UK_STRATEGY: ComplianceStrategy = {
     SEXUAL_ORIENTATION: createEntityStrategy([{ type: 'redact' }], { riskLevel: 'high' }),
     UK_NHS_NUMBER: createEntityStrategy([{ type: 'hash' }, { type: 'redact' }]),
     UK_NINO: createEntityStrategy([{ type: 'hash' }, { type: 'redact' }]),
-    UK_POSTCODE: createEntityStrategy([{ type: 'generalize', params: { level: 'region' } }]),
+    UK_POSTCODE: createEntityStrategy([
+      { type: 'generalize', params: { level: 'uk_outward_code' } },
+    ]),
+    UK_GP_PRACTICE_CODE: createEntityStrategy([{ type: 'hash' }, { type: 'redact' }]),
     UK_PASSPORT: createEntityStrategy([{ type: 'hash' }, { type: 'redact' }]),
     UK_DRIVER_LICENSE: createEntityStrategy([{ type: 'hash' }, { type: 'redact' }]),
     UK_SORT_CODE: createEntityStrategy([{ type: 'mask', params: { keepLast: 2 } }]),
+    OCCUPATION: createEntityStrategy([{ type: 'redact' }], { riskLevel: 'medium' }),
     URL: createEntityStrategy([{ type: 'redact' }]),
   },
   adHocRecognizers: [...GDPR_EU_CUSTOM_RECOGNIZERS, ...GDPR_UK_CUSTOM_RECOGNIZERS],
