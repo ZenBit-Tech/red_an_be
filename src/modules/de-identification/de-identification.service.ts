@@ -2185,7 +2185,7 @@ export default class DeIdService {
     );
 
     hardened = hardened.replace(
-      /(\b(?:Date\s+of\s+Birth|DOB)\s*:\s*)(?:\d{1,2}[/.\-]\d{1,2}[/.\-])?(?:19\d{2}|20\d{2})\s*(?:\(\s*Age\s*)?\[([0-9]{1,3}(?:-[0-9]{1,3}|\+))\]\)?/gi,
+      /(\b(?:Date\s+of\s+Birth|DOB)\s*:\s*)(?:\d{1,2}[/.-]\d{1,2}[/.-])?(?:19\d{2}|20\d{2})\s*(?:\(\s*Age\s*)?\[([0-9]{1,3}(?:-[0-9]{1,3}|\+))\]\)?/gi,
       '$1[AGE_RANGE: $2]',
     );
 
@@ -2259,7 +2259,7 @@ export default class DeIdService {
     let admissionDayOrdinal: number | undefined;
 
     hardened = hardened.replace(
-      /(\b(?:Date(?:\s*\/\s*Time)?|Admission\s+Date|Discharge\s+Date)\s*:\s*)(?:(?:\d{1,2}[/.\-]\d{1,2}[/.\-]|\d{1,2}\s+[A-Za-z]{3,9}\s+))?(19\d{2}|20\d{2})(\s*,\s*\d{1,2}:\d{2})?/gi,
+      /(\b(?:Date(?:\s*\/\s*Time)?|Admission\s+Date|Discharge\s+Date)\s*:\s*)(?:(?:\d{1,2}[/.-]\d{1,2}[/.-]|\d{1,2}\s+[A-Za-z]{3,9}\s+))?(19\d{2}|20\d{2})(\s*,\s*\d{1,2}:\d{2})?/gi,
       (_full, prefix: string, yearToken: string, timeSuffix?: string) => {
         const parsedTimelineYear = Number.parseInt(yearToken, 10);
         if (Number.isFinite(parsedTimelineYear)) {
@@ -2457,7 +2457,7 @@ export default class DeIdService {
     relativeTokens: string,
     fallbackAgeRange: string,
   ): string {
-    const relativeMonthMatch = relativeTokens.match(/\[RELATIVE_MONTH_([+\-]?\d+)\]/i);
+    const relativeMonthMatch = relativeTokens.match(/\[RELATIVE_MONTH_([+-]?\d+)\]/i);
     if (relativeMonthMatch) {
       const monthDelta = Number.parseInt(relativeMonthMatch[1], 10);
       if (Number.isFinite(monthDelta)) {
@@ -2467,7 +2467,7 @@ export default class DeIdService {
       }
     }
 
-    const relativeYearMatch = relativeTokens.match(/\[RELATIVE_YEAR_([+\-]?\d+)\]/i);
+    const relativeYearMatch = relativeTokens.match(/\[RELATIVE_YEAR_([+-]?\d+)\]/i);
     if (relativeYearMatch) {
       const yearDelta = Number.parseInt(relativeYearMatch[1], 10);
       if (Number.isFinite(yearDelta)) {
@@ -2617,7 +2617,7 @@ export default class DeIdService {
     const patientLastNames = new Set<string>();
     const canonicalPatientIdentityByLastName: Record<string, string> = {};
 
-    for (const span of personSpans) {
+    personSpans.forEach((span) => {
       const resolvedRole = DeIdService.resolveUkSyntheticPersonRole(text, span.start, span.end);
       const identitySource = text.slice(span.start, span.end);
       const identityKey = DeIdService.normalizeUkPersonIdentity(identitySource);
@@ -2638,7 +2638,7 @@ export default class DeIdService {
           }
         }
       }
-    }
+    });
 
     return personSpans.reduce<Record<string, string>>((acc, span) => {
       const initialRole = roleBySpanId[span.id];
@@ -2696,12 +2696,12 @@ export default class DeIdService {
 
     const matches = text.matchAll(/\[(PATIENT|RELATIVE|DOCTOR|PERSON)_ID_(\d+)\]/g);
 
-    for (const match of matches) {
+    [...matches].forEach((match) => {
       const roleToken = match[1];
       const ordinal = Number.parseInt(match[2], 10);
 
       if (!Number.isFinite(ordinal)) {
-        continue;
+        return;
       }
 
       if (roleToken === 'PATIENT') {
@@ -2725,7 +2725,7 @@ export default class DeIdService {
           ordinal,
         );
       }
-    }
+    });
 
     return counters;
   }
