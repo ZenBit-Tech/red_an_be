@@ -1783,7 +1783,65 @@ describe('DeIdService', () => {
       activeIds: ['e-dob', 'e-age'],
     });
 
-    expect(preview).toBe('Date of Birth: 1985 Age: [30-49]');
+    expect(preview).toBe('Date of Birth: [REDACT] Age: [30-34]');
+  });
+
+  it('should not expose exact birth year together with age bucket in GDPR_EU preview', async () => {
+    const text = 'Date of Birth: 15/06/1975 Age: 51 Consultation Date: 2026';
+    const hash = createHash('sha256').update(text).digest('hex');
+
+    const dobStart = text.indexOf('15/06/1975');
+    const ageStart = text.indexOf('51');
+    const consultationYearStart = text.lastIndexOf('2026');
+
+    entityManagerMock.findOne.mockResolvedValue({
+      id: 'job-gdpr-eu-dob-age-linkage',
+      framework: ComplianceFramework.GDPR_EU,
+      sourceTextHash: hash,
+      sourceTextLength: text.length,
+    } satisfies Partial<DeIdJob>);
+
+    entityManagerMock.find.mockResolvedValue([
+      {
+        id: 'e-gdpr-eu-dob-linkage',
+        jobId: 'job-gdpr-eu-dob-age-linkage',
+        category: 'DATE_OF_BIRTH',
+        confidence: 96,
+        start: dobStart,
+        end: dobStart + '15/06/1975'.length,
+        proxyType: 'Generalize',
+      },
+      {
+        id: 'e-gdpr-eu-age-linkage',
+        jobId: 'job-gdpr-eu-dob-age-linkage',
+        category: 'AGE',
+        confidence: 95,
+        start: ageStart,
+        end: ageStart + '51'.length,
+        proxyType: 'Generalize',
+      },
+      {
+        id: 'e-gdpr-eu-consultation-year',
+        jobId: 'job-gdpr-eu-dob-age-linkage',
+        category: 'DATE_TIME',
+        confidence: 94,
+        start: consultationYearStart,
+        end: consultationYearStart + '2026'.length,
+        proxyType: 'Generalize',
+      },
+    ] satisfies Partial<DetectedEntity>[]);
+
+    const preview = await service.getPreview({
+      jobId: 'job-gdpr-eu-dob-age-linkage',
+      text,
+      framework: ComplianceFramework.GDPR_EU,
+      activeIds: ['e-gdpr-eu-dob-linkage', 'e-gdpr-eu-age-linkage', 'e-gdpr-eu-consultation-year'],
+    });
+
+    expect(preview).toContain('Date of Birth: [REDACT]');
+    expect(preview).toContain('Age: [50-54]');
+    expect(preview).toContain('Consultation Date: 2026');
+    expect(preview).not.toContain('1975');
   });
 
   it('should wrap unexpected preview failures with internal error', async () => {
@@ -2337,8 +2395,7 @@ describe('DeIdService', () => {
       activeIds: ['e-phone-overlap', 'e-date-inside-phone'],
     });
 
-    // WP29 guidance: phone geographic codes enable linkage attacks. GDPR strategy removes area code.
-    expect(preview).toMatch(/^Contact:\s+\+39\s+\[REDACT\]$/);
+    expect(preview).toBe('Contact: [REDACT]');
     expect(preview).not.toContain('[MONTH_YEAR]');
   });
 
@@ -2374,8 +2431,178 @@ describe('DeIdService', () => {
       activeIds: ['e-contact-span'],
     });
 
-    // WP29 guidance: phone numbers have area code removed before redaction to prevent linkage attacks.
-    expect(preview).toBe('Contact: +49 [REDACT]');
+    expect(preview).toBe('Contact: [REDACT]');
+  });
+
+  it('should preserve ● bullet marker before Contact: when preceding Address field is redacted', async () => {
+    const text =
+      '● Address: 45 Oak Avenue, London, SW1A 1AA ● Contact: +48 501 123 456 ● Health Insurance Number: ABC123';
+    const hash = createHash('sha256').update(text).digest('hex');
+
+    const addressStart = text.indexOf('45 Oak Avenue');
+    const phoneStart = text.indexOf('+48 501 123 456');
+
+    entityManagerMock.findOne.mockResolvedValue({
+      id: 'job-bullet-contact',
+      framework: ComplianceFramework.GDPR_EU,
+      sourceTextHash: hash,
+      sourceTextLength: text.length,
+    } satisfies Partial<DeIdJob>);
+
+    entityManagerMock.find.mockResolvedValue([
+      {
+        id: 'e-address',
+        jobId: 'job-bullet-contact',
+        category: 'ADDRESS',
+        confidence: 97,
+        start: addressStart,
+        end: addressStart + '45 Oak Avenue, London, SW1A 1AA'.length,
+        proxyType: 'Redact',
+      },
+      {
+        id: 'e-phone',
+        jobId: 'job-bullet-contact',
+        category: 'PHONE_NUMBER',
+        confidence: 98,
+        start: phoneStart,
+        end: phoneStart + '+48 501 123 456'.length,
+        proxyType: 'Redact',
+      },
+    ] satisfies Partial<DetectedEntity>[]);
+
+    const preview = await service.getPreview({
+      jobId: 'job-bullet-contact',
+      text,
+      framework: ComplianceFramework.GDPR_EU,
+      activeIds: ['e-address', 'e-phone'],
+    });
+
+    expect(preview).toContain('● Address: [REDACT]');
+    expect(preview).toContain('● Contact: [REDACT]');
+  });
+
+  it('should preserve ● marker before Date of Birth in GDPR_EU Italian inline demographics format', async () => {
+    const text = '● Full Name: Mario Rossi ● Date of Birth: 15/06/1959 (Age: 67) ● Gender: Male';
+    const hash = createHash('sha256').update(text).digest('hex');
+
+    const nameStart = text.indexOf('Mario Rossi');
+    const dobStart = text.indexOf('15/06/1959');
+    const ageStart = text.indexOf('67');
+
+    entityManagerMock.findOne.mockResolvedValue({
+      id: 'job-bullet-dob-italian-inline',
+      framework: ComplianceFramework.GDPR_EU,
+      sourceTextHash: hash,
+      sourceTextLength: text.length,
+    } satisfies Partial<DeIdJob>);
+
+    entityManagerMock.find.mockResolvedValue([
+      {
+        id: 'e-name-with-inline-bullet-tail',
+        jobId: 'job-bullet-dob-italian-inline',
+        category: 'PERSON',
+        confidence: 97,
+        start: nameStart,
+        end: text.indexOf('Date of Birth:'),
+        proxyType: 'Replace',
+      },
+      {
+        id: 'e-dob',
+        jobId: 'job-bullet-dob-italian-inline',
+        category: 'DATE_OF_BIRTH',
+        confidence: 98,
+        start: dobStart,
+        end: dobStart + '15/06/1959'.length,
+        proxyType: 'Redact',
+      },
+      {
+        id: 'e-age',
+        jobId: 'job-bullet-dob-italian-inline',
+        category: 'AGE',
+        confidence: 98,
+        start: ageStart,
+        end: ageStart + '67'.length,
+        proxyType: 'Generalize',
+      },
+      {
+        id: 'e-gender',
+        jobId: 'job-bullet-dob-italian-inline',
+        category: 'GENDER',
+        confidence: 96,
+        start: text.indexOf('Male'),
+        end: text.indexOf('Male') + 'Male'.length,
+        proxyType: 'Redact',
+      },
+    ] satisfies Partial<DetectedEntity>[]);
+
+    const preview = await service.getPreview({
+      jobId: 'job-bullet-dob-italian-inline',
+      text,
+      framework: ComplianceFramework.GDPR_EU,
+      activeIds: ['e-name-with-inline-bullet-tail', 'e-dob', 'e-age', 'e-gender'],
+    });
+
+    expect(preview).toContain('● Full Name: [PATIENT_ID_1]');
+    expect(preview).toContain('● Date of Birth: [REDACT] (Age: [65-69])');
+    expect(preview).toContain('● Gender: Male');
+  });
+
+  it('should collapse adjacent address spans into one redaction for Italian address fields', async () => {
+    const text = '● Address: Via Roma 10, Milano, 20121 ● Contact: +39 06 9876543';
+    const hash = createHash('sha256').update(text).digest('hex');
+
+    const streetStart = text.indexOf('Via Roma 10');
+    const cityStart = text.indexOf('Milano');
+    const postalCodeStart = text.indexOf('20121');
+
+    entityManagerMock.findOne.mockResolvedValue({
+      id: 'job-address-collapse',
+      framework: ComplianceFramework.GDPR_EU,
+      sourceTextHash: hash,
+      sourceTextLength: text.length,
+    } satisfies Partial<DeIdJob>);
+
+    entityManagerMock.find.mockResolvedValue([
+      {
+        id: 'e-address-street',
+        jobId: 'job-address-collapse',
+        category: 'ADDRESS',
+        confidence: 99,
+        start: streetStart,
+        end: streetStart + 'Via Roma 10'.length,
+        proxyType: 'Redact',
+      },
+      {
+        id: 'e-address-city',
+        jobId: 'job-address-collapse',
+        category: 'LOCATION',
+        confidence: 99,
+        start: cityStart,
+        end: cityStart + 'Milano'.length,
+        proxyType: 'Redact',
+      },
+      {
+        id: 'e-address-postal-code',
+        jobId: 'job-address-collapse',
+        category: 'LOCATION',
+        confidence: 99,
+        start: postalCodeStart,
+        end: postalCodeStart + '20121'.length,
+        proxyType: 'Redact',
+      },
+    ] satisfies Partial<DetectedEntity>[]);
+
+    const preview = await service.getPreview({
+      jobId: 'job-address-collapse',
+      text,
+      framework: ComplianceFramework.GDPR_EU,
+      activeIds: ['e-address-street', 'e-address-city', 'e-address-postal-code'],
+    });
+
+    expect(preview).toContain('● Address: [REDACT]');
+    expect(preview).not.toContain('[REDACT] [REDACT]');
+    expect(preview).not.toContain('Milano');
+    expect(preview).not.toContain('20121');
   });
 
   it('should keep duration token unchanged and not generalize 3-day to [YEAR] in GDPR_UK preview', async () => {
@@ -2413,7 +2640,7 @@ describe('DeIdService', () => {
     expect(preview).not.toContain('[YEAR] history');
   });
 
-  it('should remove area code from phone number before redaction in GDPR_EU preview', async () => {
+  it('should fully redact phone number including country code in GDPR_EU preview', async () => {
     const text = 'Contact: +49 30 1234567';
     const hash = createHash('sha256').update(text).digest('hex');
 
@@ -2448,8 +2675,7 @@ describe('DeIdService', () => {
       activeIds: ['e-phone-areacode'],
     });
 
-    // WP29 guidance: area code (+49 30) is removed before redaction to prevent linkage attacks.
-    expect(preview).toBe('Contact: +49 [REDACT]');
+    expect(preview).toBe('Contact: [REDACT]');
   });
 
   it('should merge split PHONE_NUMBER and NATIONAL_ID spans in GDPR_EU preview', async () => {
@@ -2493,10 +2719,10 @@ describe('DeIdService', () => {
       activeIds: ['e-phone-split-gdpr'],
     });
 
-    expect(preview).toBe('Contact: +49 [REDACT]');
+    expect(preview).toBe('Contact: [REDACT]');
   });
 
-  it('should sanitize PL_PHONE_NUMBER in GDPR_EU preview by keeping only country code', async () => {
+  it('should fully redact PL_PHONE_NUMBER in GDPR_EU preview including country code', async () => {
     const text = 'Contact: +48 501 123 456';
     const hash = createHash('sha256').update(text).digest('hex');
 
@@ -2531,7 +2757,7 @@ describe('DeIdService', () => {
       activeIds: ['e-pl-phone-gdpr'],
     });
 
-    expect(preview).toBe('Contact: +48 [REDACT]');
+    expect(preview).toBe('Contact: [REDACT]');
   });
 
   it('should fully redact GDPR_UK phone-like value when country code is missing', async () => {
@@ -2845,7 +3071,7 @@ describe('DeIdService', () => {
 
     // PHONE_NUMBER (priority 120) should win over NATIONAL_ID (priority 105)
     // NATIONAL_ID is mandatory for GDPR but overlapping PHONE_NUMBER takes precedence
-    expect(preview).toBe('Contact: +49 [REDACT]');
+    expect(preview).toBe('Contact: [REDACT]');
   });
 
   it('should keep Female and still redact address when PERSON span contains "Female Address" without colon', async () => {
@@ -3366,7 +3592,7 @@ describe('DeIdService', () => {
       activeIds: ['e1'],
     });
 
-    expect(preview).toBe('[SYNTHETIC_ID] is here');
+    expect(preview).toBe('[PERSON_ID_1] is here');
   });
 
   it('should apply keep_domain and mask operators for email in preview', async () => {
@@ -4194,7 +4420,8 @@ describe('DeIdService', () => {
     expect(preview).toContain('Full Name: Mr. [PATIENT_ID_1]');
     expect(preview).toContain('Date of Birth: [AGE_RANGE: 50-69]');
     expect(preview).not.toContain('Date of Birth: 1958');
-    expect(preview).toContain('Address: [REDACT, Greater London]');
+    expect(preview).toContain('Address: [REDACT]');
+    expect(preview).not.toContain('[REDACT, Greater London]');
     expect(preview).toContain('GP: Dr. [DOCTOR_ID_1] (GMC: [REDACT])');
     expect(preview).toContain('Date/Time: [Day 1]');
     expect(preview).toContain('Echo EF 35% ([RELATIVE_YEAR_-1])');
@@ -4519,7 +4746,7 @@ describe('DeIdService', () => {
       activeIds: ['e1'],
     });
 
-    expect(preview).toBe('Patient aged [30-49]');
+    expect(preview).toBe('Patient aged [35-39]');
   });
 
   it('should apply truncate and hash operators for IP address in preview', async () => {
@@ -5947,7 +6174,7 @@ describe('DeIdService', () => {
       expect(preview).toContain('General Medicine Outpatient Department');
     });
 
-    it('should escape HTML-unsafe characters (>, <, &) in anonymized output', async () => {
+    it('should preserve clinical comparison characters (>, <, &) unmodified in anonymized output', async () => {
       const text =
         'Lab Result: Blood sugar >90 mg/dL, <120 baseline & 180 peak. Patient: John Smith.';
       const hash = createHash('sha256').update(text).digest('hex');
@@ -5980,11 +6207,11 @@ describe('DeIdService', () => {
         activeIds: ['e-john-person'],
       });
 
-      expect(preview).not.toContain('>');
-      expect(preview).not.toContain('<');
-      expect(preview).toContain('greater than');
-      expect(preview).toContain('less than');
-      expect(preview).toContain(' and ');
+      expect(preview).toContain('>');
+      expect(preview).toContain('<');
+      expect(preview).not.toContain('greater than');
+      expect(preview).not.toContain('less than');
+      expect(preview).toContain('&');
     });
 
     it('should not replace struct_labels (Clinic:, Location:, Department:) with doctor tokens in NHS clinic letter', async () => {
@@ -6268,7 +6495,8 @@ describe('DeIdService', () => {
         ],
       });
 
-      expect(preview).toContain('[REDACT] Outpatient Clinic Letter');
+      expect(preview).toContain('[HOSPITAL] Outpatient Clinic Letter');
+      expect(preview).not.toContain('[REDACT] Outpatient Clinic Letter');
       expect(preview).toContain('Patient: Mr. [PATIENT_ID_1]');
       expect(preview).toContain('DOB: [AGE_RANGE: 50-69]');
       expect(preview).not.toContain('DOB: 1968');
@@ -6699,8 +6927,9 @@ describe('DeIdService', () => {
 
       expect(preview).toContain('Patient: Mr. [PATIENT_ID_1].');
       expect(preview).toContain('GP: Dr. [DOCTOR_ID_1], [GP_PRACTICE], [REGION].');
-      expect(preview).toContain('works as [OCCUPATION], lives with wife.');
+      expect(preview).toContain('works as [OCCUPATION], [SOCIAL_CONTEXT: cohabiting].');
       expect(preview).not.toContain('works as accountant');
+      expect(preview).not.toContain('lives with wife');
     });
 
     it('should preserve package-level synthetic ID continuity and normalize ward and medication changes formatting', async () => {
@@ -6880,6 +7109,85 @@ describe('DeIdService', () => {
       );
       expect(preview).not.toContain('**Drug****Dose****Action****Reason****Furosemide**40mg BD');
       expect(preview).not.toContain('Mr. [DOCTOR_ID_1]');
+    });
+
+    it('should convert procedure dates in parentheses to Day tokens within admission episode context', async () => {
+      const text =
+        'Admission Date: 2024. Procedures: Transthoracic Echocardiogram (12/04/2024). Discharge Date: 2024.';
+      const hash = createHash('sha256').update(text).digest('hex');
+
+      entityManagerMock.findOne.mockResolvedValue({
+        id: 'job-gdpr-uk-procedure-parenthetical-day-token',
+        framework: ComplianceFramework.GDPR_UK,
+        sourceTextHash: hash,
+        sourceTextLength: text.length,
+      } satisfies Partial<DeIdJob>);
+
+      entityManagerMock.find.mockResolvedValue([]);
+
+      const preview = await service.getPreview({
+        jobId: 'job-gdpr-uk-procedure-parenthetical-day-token',
+        text,
+        framework: ComplianceFramework.GDPR_UK,
+        activeIds: [],
+      });
+
+      expect(preview).toContain('Admission Date: [Day 1].');
+      expect(preview).toContain('Transthoracic Echocardiogram ([Day 3]).');
+      expect(preview).toContain('Discharge Date: [Day 2].');
+      expect(preview).not.toContain('[CURRENT_YEAR]');
+      expect(preview).not.toContain('12/04/2024');
+    });
+
+    it('should map residual current-year tokens to DAY_RANGE when admission episode is present', async () => {
+      const text =
+        'Admission Date: 2024. Discharge Date: 2024. Procedures note: follow-up arranged in 2024.';
+      const hash = createHash('sha256').update(text).digest('hex');
+
+      entityManagerMock.findOne.mockResolvedValue({
+        id: 'job-gdpr-uk-episode-current-year-day-range',
+        framework: ComplianceFramework.GDPR_UK,
+        sourceTextHash: hash,
+        sourceTextLength: text.length,
+      } satisfies Partial<DeIdJob>);
+
+      entityManagerMock.find.mockResolvedValue([]);
+
+      const preview = await service.getPreview({
+        jobId: 'job-gdpr-uk-episode-current-year-day-range',
+        text,
+        framework: ComplianceFramework.GDPR_UK,
+        activeIds: [],
+      });
+
+      expect(preview).toContain('Admission Date: [Day 1].');
+      expect(preview).toContain('Discharge Date: [Day 2].');
+      expect(preview).toContain('follow-up arranged in [DAY_RANGE].');
+      expect(preview).not.toContain('[CURRENT_YEAR]');
+    });
+
+    it('should keep CURRENT_YEAR token for non-episode residual year references', async () => {
+      const text = 'Clinical note: follow-up arranged in 2024.';
+      const hash = createHash('sha256').update(text).digest('hex');
+
+      entityManagerMock.findOne.mockResolvedValue({
+        id: 'job-gdpr-uk-non-episode-current-year',
+        framework: ComplianceFramework.GDPR_UK,
+        sourceTextHash: hash,
+        sourceTextLength: text.length,
+      } satisfies Partial<DeIdJob>);
+
+      entityManagerMock.find.mockResolvedValue([]);
+
+      const preview = await service.getPreview({
+        jobId: 'job-gdpr-uk-non-episode-current-year',
+        text,
+        framework: ComplianceFramework.GDPR_UK,
+        activeIds: [],
+      });
+
+      expect(preview).toContain('Clinical note: follow-up arranged in [CURRENT_YEAR].');
+      expect(preview).not.toContain('[DAY_RANGE]');
     });
 
     it('should normalize compact medication changes blob without spacing separators in UK output', async () => {

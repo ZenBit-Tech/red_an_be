@@ -274,6 +274,8 @@ const UK_GP_PRACTICE_KEYWORDS = [
   'practice',
   'surgery',
 ] as const;
+const UK_NHS_TRUST_ORGANIZATION_PATTERN =
+  /\b(?:nhs(?:\s+[a-z][a-z'’-]+){0,6}\s+trust|(?:nhs\s+)?foundation\s+trust)\b/i;
 const UK_MEDICAL_PROGRAM_ALLOWLIST = ['desmond', 'qismet', 'dafne'] as const;
 const MEDICAL_DIAGNOSIS_TERM_PATTERN = /\b[a-z][a-z-]{3,}(?:emia|tension)\b/i;
 const TIME_TOKEN_PATTERN = /\b(?:[01]?\d|2[0-3]):[0-5]\d\b/;
@@ -900,12 +902,15 @@ export default class DeIdService {
         (entity, end) => ({ ...entity, end }),
       );
       const strategy = getComplianceStrategy(dto.framework);
-      const previewSpans = DeIdService.buildNonOverlappingPreviewSpans(
+      const previewSpans = DeIdService.collapseAdjacentAddressLikePreviewSpans(
         dto.text,
-        normalizedEntities,
-      ).sort((first, second) => second.start - first.start);
+        DeIdService.buildNonOverlappingPreviewSpans(dto.text, normalizedEntities).sort(
+          (first, second) => second.start - first.start,
+        ),
+      );
       const ukSyntheticPersonBySpanId =
-        dto.framework === ComplianceFramework.GDPR_UK
+        dto.framework === ComplianceFramework.GDPR_UK ||
+        dto.framework === ComplianceFramework.GDPR_EU
           ? DeIdService.buildUkSyntheticPersonReplacementMap(dto.text, previewSpans)
           : {};
 
@@ -930,23 +935,26 @@ export default class DeIdService {
           return resultText;
         }
 
-        // GDPR WP29 guidance: remove geographic area codes from phone numbers (e.g., +49 30 → +49)
-        // to eliminate linkage attack vectors via area-code + DOB + gender combinations.
+        // GDPR EU hardening: fully redact phone tokens (including country code)
+        // to prevent geographic linkage vectors from international prefixes.
         const isGdprPhoneNumber =
           GDPR_PHONE_ENTITY_CATEGORIES.includes(
             span.category as (typeof GDPR_PHONE_ENTITY_CATEGORIES)[number],
-          ) &&
-          (dto.framework === ComplianceFramework.GDPR_EU ||
-            dto.framework === ComplianceFramework.GDPR_UK);
+          ) && dto.framework === ComplianceFramework.GDPR_EU;
 
         const entityStrategy = strategy.entities[span.category] ?? DEFAULT_ENTITY_STRATEGY;
         let replacement: string;
 
-        if (dto.framework === ComplianceFramework.GDPR_UK && span.category === 'PERSON') {
-          const syntheticToken = ukSyntheticPersonBySpanId[span.id] ?? '[SYNTHETIC_ID]';
+        if (
+          (dto.framework === ComplianceFramework.GDPR_UK ||
+            dto.framework === ComplianceFramework.GDPR_EU) &&
+          span.category === 'PERSON'
+        ) {
+          const syntheticToken = ukSyntheticPersonBySpanId[span.id] ?? '[PERSON_ID_?]';
           replacement = DeIdService.applyUkSyntheticPersonToken(originalValue, syntheticToken);
         } else if (
-          dto.framework === ComplianceFramework.GDPR_UK &&
+          (dto.framework === ComplianceFramework.GDPR_UK ||
+            dto.framework === ComplianceFramework.GDPR_EU) &&
           span.category === 'ORGANIZATION' &&
           ukSyntheticPersonBySpanId[span.id]
         ) {
@@ -960,11 +968,9 @@ export default class DeIdService {
         ) {
           replacement = DeIdService.getUkOrganizationReplacement(originalValue);
         } else if (dto.framework === ComplianceFramework.GDPR_UK && span.category === 'ADDRESS') {
-          replacement = DeIdService.getUkAddressReplacement(dto.text, span.start, originalValue);
+          replacement = DeIdService.getUkAddressReplacement();
         } else if (isGdprPhoneNumber) {
-          // For GDPR phone entities: preserve country code, redact the rest
-          const sanitized = DeIdService.sanitizePhoneForGdpr(originalValue);
-          replacement = sanitized; // Returns "+CC [REDACT]" format
+          replacement = DeIdService.sanitizePhoneForGdpr(originalValue);
         } else {
           replacement = DeIdService.calculateReplacement(originalValue, entityStrategy.operators);
         }
@@ -979,8 +985,7 @@ export default class DeIdService {
         );
       }, dto.text);
 
-      const escapedText = DeIdService.escapeHtmlUnsafeCharacters(anonymizedText);
-      const normalizedText = normalizeAnonymizedText(escapedText);
+      const normalizedText = normalizeAnonymizedText(anonymizedText);
       const frameworkHardenedText =
         dto.framework === ComplianceFramework.GDPR_UK
           ? DeIdService.applyUkPatientIdentificationHardening(normalizedText)
@@ -2103,6 +2108,10 @@ export default class DeIdService {
       return value;
     }
 
+    if (DeIdService.isUkTrustOrganizationName(normalizedValue)) {
+      return '[HOSPITAL]';
+    }
+
     if (UK_HOSPITAL_KEYWORDS.some((keyword) => normalizedValue.includes(keyword))) {
       return '[HOSPITAL]';
     }
@@ -2118,15 +2127,7 @@ export default class DeIdService {
     return '[REDACT]';
   }
 
-  private static getUkAddressReplacement(text: string, start: number, value: string): string {
-    const lookbehind = text.slice(Math.max(0, start - 220), start).toLowerCase();
-    const hasPatientIdentificationContext = /patient\s+identification/.test(lookbehind);
-    const normalizedValue = value.toLowerCase();
-
-    if (hasPatientIdentificationContext && /\blondon\b/.test(normalizedValue)) {
-      return '[REDACT, Greater London]';
-    }
-
+  private static getUkAddressReplacement(): string {
     return '[REDACT]';
   }
 
@@ -2177,6 +2178,16 @@ export default class DeIdService {
       '[SOCIAL_DEPENDENTS_REDACTED]',
     );
 
+    hardened = hardened.replace(
+      /\blives\s+with\s+(?:(?:his|her|their)\s+)?(?:wife|husband|partner|spouse)\b/gi,
+      '[SOCIAL_CONTEXT: cohabiting]',
+    );
+
+    hardened = hardened.replace(
+      /\blives\s+(?:alone|with\s+(?:(?:his|her|their)\s+)?(?:mother|father|son|daughter|family|parents|roommate|friend))\b/gi,
+      '[SOCIAL_CONTEXT]',
+    );
+
     hardened = hardened.replace(/(\bNext\s+of\s+kin:[^\n]*?\[REDACT\])\s*\[GP_PRACTICE\]/gi, '$1');
 
     hardened = hardened.replace(
@@ -2185,18 +2196,18 @@ export default class DeIdService {
     );
 
     hardened = hardened.replace(
-      /(\b(?:Date\s+of\s+Birth|DOB)\s*:\s*)(?:\d{1,2}[/.-]\d{1,2}[/.-])?(?:19\d{2}|20\d{2})\s*(?:\(\s*Age\s*)?\[([0-9]{1,3}(?:-[0-9]{1,3}|\+))\]\)?/gi,
-      '$1[AGE_RANGE: $2]',
+      /(?<=\b(?:Date\s+of\s+Birth|DOB)\s*:\s*)(?:\d{1,2}[/.-]\d{1,2}[/.-])?(?:19\d{2}|20\d{2})\s*(?:\(\s*Age\s*)?\[([0-9]{1,3}(?:-[0-9]{1,3}|\+))\]\)?/gi,
+      '[AGE_RANGE: $1]',
     );
 
     hardened = hardened.replace(
-      /(\b(?:Date\s+of\s+Birth|DOB)\s*:\s*)(?:19\d{2}|20\d{2})\s*\(\s*\[([0-9]{1,3}(?:-[0-9]{1,3}|\+))\]\s*\)/gi,
-      '$1[AGE_RANGE: $2]',
+      /(?<=\b(?:Date\s+of\s+Birth|DOB)\s*:\s*)(?:19\d{2}|20\d{2})\s*\(\s*\[([0-9]{1,3}(?:-[0-9]{1,3}|\+))\]\s*\)/gi,
+      '[AGE_RANGE: $1]',
     );
 
     hardened = hardened.replace(
-      /(\b(?:Date\s+of\s+Birth|DOB)\s*:\s*)(?:19\d{2}|20\d{2})\s*\[([0-9]{1,3}(?:-[0-9]{1,3}|\+))\]/gi,
-      '$1[AGE_RANGE: $2]',
+      /(?<=\b(?:Date\s+of\s+Birth|DOB)\s*:\s*)(?:19\d{2}|20\d{2})\s*\[([0-9]{1,3}(?:-[0-9]{1,3}|\+))\]/gi,
+      '[AGE_RANGE: $1]',
     );
 
     hardened = hardened.replace(
@@ -2259,7 +2270,7 @@ export default class DeIdService {
     let admissionDayOrdinal: number | undefined;
 
     hardened = hardened.replace(
-      /(\b(?:Date(?:\s*\/\s*Time)?|Admission\s+Date|Discharge\s+Date)\s*:\s*)(?:(?:\d{1,2}[/.-]\d{1,2}[/.-]|\d{1,2}\s+[A-Za-z]{3,9}\s+))?(19\d{2}|20\d{2})(\s*,\s*\d{1,2}:\d{2})?/gi,
+      /(\b(?:Date(?:\s*\/\s*Time)?|Admission\s+Date|Discharge\s+Date|Date\s+of\s+Procedure|Procedure\s+Date)\s*:\s*)(?:(?:\d{1,2}[/.-]\d{1,2}[/.-]|\d{1,2}\s+[A-Za-z]{3,9}\s+))?(19\d{2}|20\d{2})(\s*,\s*\d{1,2}:\d{2})?/gi,
       (_full, prefix: string, yearToken: string, timeSuffix?: string) => {
         const parsedTimelineYear = Number.parseInt(yearToken, 10);
         if (Number.isFinite(parsedTimelineYear)) {
@@ -2292,12 +2303,31 @@ export default class DeIdService {
       },
     );
 
+    hardened = hardened.replace(
+      /(\b(?:Echocardiogram|Echo|CT|MRI|X-?Ray|Biopsy|Procedure|Test|Study|Scan)\b[^(\n]{0,80})\((\d{1,2}[/.-]\d{1,2}[/.-](19\d{2}|20\d{2}))\)/gi,
+      (_full, prefix: string, _dateToken: string, yearToken: string) => {
+        if (admissionDayOrdinal === undefined) {
+          return `${prefix}(${_dateToken})`;
+        }
+
+        const parsedTimelineYear = Number.parseInt(yearToken, 10);
+        if (Number.isFinite(parsedTimelineYear)) {
+          timelineYearValues.push(parsedTimelineYear);
+        }
+
+        const resolvedOrdinal = nextDayOrdinal;
+        nextDayOrdinal += 1;
+        return `${prefix}([Day ${resolvedOrdinal}])`;
+      },
+    );
+
     const years = [...hardened.matchAll(/\b(19\d{2}|20\d{2})\b/g)]
       .map((match) => Number.parseInt(match[1], 10))
       .filter((year) => Number.isFinite(year));
     const baselineCandidates = [...years, ...timelineYearValues];
     const baselineYear =
       baselineCandidates.length > 0 ? Math.max(...baselineCandidates) : undefined;
+    const useDayRangeForCurrentYear = admissionDayOrdinal !== undefined;
 
     // Never expose DOB via relative month/year tokens; collapse to age band only.
     hardened = hardened.replace(
@@ -2406,12 +2436,17 @@ export default class DeIdService {
       const relative = DeIdService.getRelativeYearToken(
         Number.parseInt(yearToken, 10),
         baselineYear,
+        useDayRangeForCurrentYear,
       );
       return `(${relative})`;
     });
 
     hardened = hardened.replace(/\b(19\d{2}|20\d{2})\b/g, (_full, yearToken: string) =>
-      DeIdService.getRelativeYearToken(Number.parseInt(yearToken, 10), baselineYear),
+      DeIdService.getRelativeYearToken(
+        Number.parseInt(yearToken, 10),
+        baselineYear,
+        useDayRangeForCurrentYear,
+      ),
     );
 
     // Ensure adjacent synthetic tags are tokenized separately.
@@ -2420,10 +2455,18 @@ export default class DeIdService {
     return hardened;
   }
 
-  private static getRelativeYearToken(year: number, baselineYear: number): string {
+  private static getRelativeYearToken(
+    year: number,
+    baselineYear: number,
+    useDayRangeForCurrentYear = false,
+  ): string {
     const delta = year - baselineYear;
 
     if (delta === 0) {
+      if (useDayRangeForCurrentYear) {
+        return '[DAY_RANGE]';
+      }
+
       return '[CURRENT_YEAR]';
     }
 
@@ -2741,6 +2784,10 @@ export default class DeIdService {
     }
 
     const normalizedValue = value.toLowerCase();
+    if (DeIdService.isUkTrustOrganizationName(normalizedValue)) {
+      return false;
+    }
+
     if (UK_HOSPITAL_KEYWORDS.some((keyword) => normalizedValue.includes(keyword))) {
       return false;
     }
@@ -2750,6 +2797,10 @@ export default class DeIdService {
     }
 
     return /^(?:dr|doctor)\.?\s+[a-z][a-z'-]+(?:\s+[a-z][a-z'-]+){0,3}$/i.test(value);
+  }
+
+  private static isUkTrustOrganizationName(normalizedValue: string): boolean {
+    return UK_NHS_TRUST_ORGANIZATION_PATTERN.test(normalizedValue);
   }
 
   private static applyUkSyntheticPersonToken(originalValue: string, token: string): string {
@@ -3215,21 +3266,25 @@ export default class DeIdService {
     return findings
       .map((finding) => {
         const value = text.substring(finding.start, finding.end);
+        let candidateEnd = finding.end;
+
         // Truncate span at the first newline — Presidio must not capture across lines
         const newlineIdx = value.indexOf('\n');
         if (newlineIdx > 0) {
-          return { ...finding, end: finding.start + newlineIdx };
+          candidateEnd = Math.min(candidateEnd, finding.start + newlineIdx);
         }
 
         const markerIdx = value.search(FIELD_MARKER_BOUNDARY_PATTERN);
         if (markerIdx > 0) {
-          return { ...finding, end: finding.start + markerIdx };
+          candidateEnd = Math.min(candidateEnd, finding.start + markerIdx);
         }
 
-        // Trim trailing whitespace and punctuation
-        const trailingCharsMatch = value.match(/[\s,;:]+$/);
+        const candidateValue = text.substring(finding.start, candidateEnd);
+        // Trim trailing whitespace, punctuation and inline field-separator bullets
+        // so separators like "● Date of Birth:" remain attached to the next field.
+        const trailingCharsMatch = candidateValue.match(/[\s,;:\u25CF\u2022\u2023\u2043\u00B7]+$/u);
         const trailingCharsLength = trailingCharsMatch?.[0].length ?? 0;
-        const trimmedEnd = finding.end - trailingCharsLength;
+        const trimmedEnd = candidateEnd - trailingCharsLength;
         return { ...finding, end: trimmedEnd };
       })
       .filter((finding) => finding.end > finding.start);
@@ -3279,7 +3334,10 @@ export default class DeIdService {
 
         const valueChunk = text.slice(addressStart, rawEnd);
         const leadingWhitespaceLength = valueChunk.match(/^\s*/)?.[0].length ?? 0;
-        const trailingWhitespaceLength = valueChunk.match(/\s*$/)?.[0].length ?? 0;
+        // Strip trailing whitespace AND inline field-separator bullets (●, •, ·, U+25CF, U+2022)
+        // to prevent the bullet preceding the next field label from being consumed by this span.
+        const trailingWhitespaceLength =
+          valueChunk.match(/[\s\u25CF\u2022\u2023\u2043\u00B7]*$/u)?.[0].length ?? 0;
         const normalizedStart = addressStart + leadingWhitespaceLength;
         const normalizedEnd = rawEnd - trailingWhitespaceLength;
 
@@ -3298,6 +3356,48 @@ export default class DeIdService {
 
     const britishStreetAddresses = DeIdService.extractBritishStreetAddressFindings(text);
     return DeIdService.mergeFindings(labeledAddresses, britishStreetAddresses);
+  }
+
+  private static collapseAdjacentAddressLikePreviewSpans(
+    text: string,
+    spans: PreviewSpan[],
+  ): PreviewSpan[] {
+    if (spans.length < 2) {
+      return spans;
+    }
+
+    const addressLikeCategories = new Set(['ADDRESS', 'LOCATION']);
+    const separatorPattern = /^[\s,;:./\-\u00B7\u2022\u2023\u2043\u25CF]*$/u;
+
+    return spans
+      .slice()
+      .sort((first, second) => first.start - second.start || first.end - second.end)
+      .reduce<PreviewSpan[]>((accumulator, span) => {
+        const previousSpan = accumulator[accumulator.length - 1];
+
+        if (!previousSpan) {
+          accumulator.push(span);
+          return accumulator;
+        }
+
+        const previousIsAddressLike = addressLikeCategories.has(previousSpan.category);
+        const currentIsAddressLike = addressLikeCategories.has(span.category);
+        const gap = text.slice(previousSpan.end, span.start);
+
+        if (!previousIsAddressLike || !currentIsAddressLike || !separatorPattern.test(gap)) {
+          accumulator.push(span);
+          return accumulator;
+        }
+
+        accumulator[accumulator.length - 1] = {
+          ...previousSpan,
+          end: Math.max(previousSpan.end, span.end),
+          confidence: Math.max(previousSpan.confidence, span.confidence),
+        };
+
+        return accumulator;
+      }, [])
+      .sort((first, second) => second.start - first.start);
   }
 
   private static extractStructuredPhoneFindings(
@@ -3515,16 +3615,15 @@ export default class DeIdService {
   }
 
   private static sanitizePhoneForGdpr(phoneValue: string): string {
-    // WP29 guidance: area codes (+49 30 for Berlin, +1 212 for NYC) enable linkage attacks.
-    // Remove area code to leave only country code + minimal digits.
-    // Pattern: +CC (space|dash)? AREA-CODE (space|dash)? REST → +CC [REDACT]
-    const countryCodePattern =
-      /^(\+\d{1,3})[\s\u002D\u2010-\u2015]?\d{1,5}[\s\u002D\u2010-\u2015]?(.*)$/u;
-    const match = phoneValue.match(countryCodePattern);
+    const phoneCorePattern = /(\+?\d(?:[\d\s().\u002D\u2010-\u2015]{5,}\d)?)/u;
+    const match = phoneValue.match(phoneCorePattern);
 
-    if (match && match[1]) {
-      // Keep country code, rest becomes [REDACT]
-      return `${match[1]} [REDACT]`;
+    if (match && match[1] && match.index !== undefined) {
+      const coreStart = match.index;
+      const coreEnd = coreStart + match[1].length;
+      const prefix = phoneValue.slice(0, coreStart);
+      const suffix = phoneValue.slice(coreEnd);
+      return `${prefix}[REDACT]${suffix}`;
     }
 
     // Safe fallback: redact fully when the phone pattern is not recognized.
@@ -3590,19 +3689,28 @@ export default class DeIdService {
 
   private static clampEndToFieldMarker(text: string, start: number, end: number): number {
     const value = text.substring(start, end);
+    let candidateEnd = end;
     const markerIdx = value.search(FIELD_MARKER_BOUNDARY_PATTERN);
 
     if (markerIdx > 0) {
-      return start + markerIdx;
+      candidateEnd = Math.min(candidateEnd, start + markerIdx);
     }
 
-    const softBoundaryIdx = value.search(FIELD_LABEL_SOFT_BOUNDARY_PATTERN);
-    if (softBoundaryIdx > 0) {
-      // Keep one whitespace before the next label to preserve token separation after replacement.
-      return start + softBoundaryIdx + 1;
+    if (candidateEnd === end) {
+      const softBoundaryIdx = value.search(FIELD_LABEL_SOFT_BOUNDARY_PATTERN);
+      if (softBoundaryIdx > 0) {
+        // Keep one whitespace before the next label to preserve token separation after replacement.
+        candidateEnd = Math.min(candidateEnd, start + softBoundaryIdx + 1);
+      }
     }
 
-    return end;
+    const clampedValue = text.substring(start, candidateEnd);
+    const trailingSeparatorMatch = clampedValue.match(
+      /[\s,;:./\-\u00B7\u2022\u2023\u2043\u25CF]+$/u,
+    );
+    const trailingSeparatorLength = trailingSeparatorMatch?.[0].length ?? 0;
+
+    return candidateEnd - trailingSeparatorLength;
   }
 
   private static extractBritishStreetAddressFindings(text: string): AnalyzerFinding[] {
@@ -3631,7 +3739,7 @@ export default class DeIdService {
   private static clampStartAfterFieldMarker(text: string, start: number, end: number): number {
     const value = text.substring(start, end);
     const markerPrefixMatch = value.match(
-      /^\s*(?:Date|Clinic|Clinician|GP|Patient|Date of Service|Date of appointment|Provider|Patient Name|Name|DOB|Date of Birth|SSN|MRN|Gender|Sex|Address|Phone|Telephone|Contact)\s*:\s*/i,
+      /^\s*(?:[\u2022\u25CF\u2023\u2043\u00B7]\s*)?(?:Date|Clinic|Clinician|GP|Patient|Date of Service|Date of appointment|Provider|Patient Name|Name|DOB|Date of Birth|SSN|MRN|Gender|Sex|Address|Phone|Telephone|Contact)\s*:\s*/i,
     );
 
     if (!markerPrefixMatch) {

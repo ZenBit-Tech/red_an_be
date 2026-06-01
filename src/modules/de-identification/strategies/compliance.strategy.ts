@@ -71,6 +71,11 @@ export const DEFAULT_ENTITY_STRATEGY: EntityStrategy = {
   riskLevel: 'high',
 };
 
+const GDPR_EU_AGE_BUCKETS = [
+  0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100,
+] as const;
+const GDPR_UK_AGE_BUCKETS = [0, 18, 30, 50, 70, 100] as const;
+
 const createEntityStrategy = (
   operators: PresidioOperator[],
   options?: EntityStrategyOptions,
@@ -135,17 +140,14 @@ const GDPR_EU_STRATEGY: ComplianceStrategy = {
     ]),
     PHONE_NUMBER: createEntityStrategy([{ type: 'redact' }], { riskLevel: 'high' }),
     PL_PHONE_NUMBER: createEntityStrategy([{ type: 'redact' }], { riskLevel: 'high' }),
-    LOCATION: createEntityStrategy([
-      { type: 'generalize', params: { level: 'city' } },
-      { type: 'generalize', params: { level: 'region' } },
-    ]),
     DATE_TIME: createEntityStrategy([{ type: 'generalize', params: { keep: 'year' } }]),
-    DATE_OF_BIRTH: createEntityStrategy([{ type: 'generalize', params: { keep: 'year' } }]),
+    DATE_OF_BIRTH: createEntityStrategy([{ type: 'redact' }], { riskLevel: 'high' }),
     AGE: createEntityStrategy([
-      { type: 'aggregate', params: { buckets: [0, 18, 30, 50, 70, 100] } },
+      { type: 'aggregate', params: { buckets: [...GDPR_EU_AGE_BUCKETS] } },
     ]),
     GENDER: createEntityStrategy([{ type: 'redact' }], { riskLevel: 'medium' }),
     ADDRESS: createEntityStrategy([{ type: 'redact' }], { riskLevel: 'high' }),
+    LOCATION: createEntityStrategy([{ type: 'redact' }], { riskLevel: 'high' }),
     ORGANIZATION: createEntityStrategy([{ type: 'redact' }], { riskLevel: 'high' }),
     NATIONAL_ID: createEntityStrategy([{ type: 'hash' }, { type: 'redact' }]),
     PASSPORT: createEntityStrategy([{ type: 'hash' }, { type: 'redact' }]),
@@ -188,7 +190,15 @@ const GDPR_UK_STRATEGY: ComplianceStrategy = {
     UK_PASSPORT: createEntityStrategy([{ type: 'hash' }, { type: 'redact' }]),
     UK_DRIVER_LICENSE: createEntityStrategy([{ type: 'hash' }, { type: 'redact' }]),
     UK_SORT_CODE: createEntityStrategy([{ type: 'mask', params: { keepLast: 2 } }]),
+    DATE_OF_BIRTH: createEntityStrategy([{ type: 'generalize', params: { keep: 'year' } }]),
+    AGE: createEntityStrategy([
+      { type: 'aggregate', params: { buckets: [...GDPR_UK_AGE_BUCKETS] } },
+    ]),
     OCCUPATION: createEntityStrategy([{ type: 'redact' }], { riskLevel: 'medium' }),
+    LOCATION: createEntityStrategy([
+      { type: 'generalize', params: { level: 'city' } },
+      { type: 'generalize', params: { level: 'region' } },
+    ]),
     URL: createEntityStrategy([{ type: 'redact' }]),
   },
   adHocRecognizers: [...GDPR_EU_CUSTOM_RECOGNIZERS, ...GDPR_UK_CUSTOM_RECOGNIZERS],
