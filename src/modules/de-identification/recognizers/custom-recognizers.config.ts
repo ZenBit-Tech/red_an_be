@@ -63,6 +63,16 @@ export const GDPR_EU_ANALYZER_ALLOW_LIST: string[] = [
   'micromol/L',
 ];
 
+export const GDPR_UK_ANALYZER_ALLOW_LIST: string[] = [
+  ...GDPR_EU_ANALYZER_ALLOW_LIST,
+  'DESMOND',
+  'QISMET',
+  'DAFNE',
+  'Hypercholesterolaemia',
+  'Hypertension',
+  'Hypotension',
+];
+
 // ---------------------------------------------------------------------------
 // Medical Allow List for HIPAA – words/phrases that MUST NOT be redacted
 // ---------------------------------------------------------------------------
@@ -373,6 +383,26 @@ const occupationRecognizerHipaa: CustomRecognizer = {
   context: ['social history', 'occupation', 'profession', 'employment', 'job', 'works as'],
 };
 
+const occupationRecognizerGdprUk: CustomRecognizer = {
+  name: 'Occupation Recognizer GDPR UK',
+  supported_language: 'en',
+  supported_entity: 'OCCUPATION',
+  patterns: [
+    {
+      name: 'occupation_field_value_uk',
+      regex: '\\b(?:Occupation|Profession|Employment|Job)\\s*:\\s*[A-Za-z][A-Za-z\\s-]{1,40}\\b',
+      score: 0.9,
+    },
+    {
+      name: 'works_as_phrase_uk',
+      regex:
+        '\\b(?:works|worked|employed|serves)\\s+as\\s+(?:an?\\s+)?[A-Za-z][A-Za-z\\s-]{1,40}\\b',
+      score: 0.88,
+    },
+  ],
+  context: ['social history', 'occupation', 'profession', 'employment', 'job', 'works as'],
+};
+
 // GDPR EU custom recognizers
 
 const euVatNumberRecognizer: CustomRecognizer = {
@@ -524,6 +554,71 @@ const ukPostcodeRecognizer: CustomRecognizer = {
     },
   ],
   context: ['postcode', 'postal', 'address', 'zip'],
+};
+
+const ukPhoneNumberRecognizer: CustomRecognizer = {
+  name: 'UK Phone Number Recognizer',
+  supported_language: 'en',
+  supported_entity: 'PHONE_NUMBER',
+  patterns: [
+    {
+      name: 'uk_mobile_with_07_or_44_prefix',
+      regex:
+        '\\b(?:\\+44[\\s\\-\\u2010-\\u2015]?(?:\\(0\\)[\\s\\-\\u2010-\\u2015]?)?|0)7\\d{3}(?:[\\s\\-\\u2010-\\u2015]?\\d{3}){2}\\b',
+      score: 0.96,
+    },
+    {
+      name: 'uk_mobile_split_prefix_block',
+      regex: '\\b(?:\\+44[\\s\\-\\u2010-\\u2015]?|0)7\\d{3}[\\s\\-\\u2010-\\u2015]?\\d{6}\\b',
+      score: 0.93,
+    },
+  ],
+  context: ['phone', 'tel', 'telephone', 'mobile', 'contact', 'next of kin'],
+};
+
+const ukGpPracticeCodeRecognizer: CustomRecognizer = {
+  name: 'UK GP Practice Code Recognizer',
+  supported_language: 'en',
+  supported_entity: 'UK_GP_PRACTICE_CODE',
+  patterns: [
+    {
+      name: 'UK GP practice code',
+      regex: '\\b[A-Z]\\d{5}\\b',
+      score: 0.9,
+    },
+  ],
+  context: ['gp', 'practice', 'practice code', 'nhs practice', 'surgery', 'ods'],
+};
+
+const ukHealthcareOrganizationRecognizer: CustomRecognizer = {
+  name: 'UK Healthcare Organization Recognizer',
+  supported_language: 'en',
+  supported_entity: 'ORGANIZATION',
+  patterns: [
+    {
+      name: 'uk_hospital_name',
+      regex:
+        "\\b(?:St\\.?\\s+[A-Z][A-Za-z'’]+(?:\\s+[A-Z][A-Za-z'’]+){0,3}\\s+Hospital|[A-Z][A-Za-z]+(?:\\s+[A-Z][A-Za-z]+){0,4}\\s+Hospital)\\b",
+      score: 0.95,
+    },
+    {
+      name: 'uk_medical_centre_name',
+      regex: '\\b[A-Z][A-Za-z]+(?:\\s+[A-Z][A-Za-z]+){0,5}\\s+Medical\\s+(?:Centre|Center)\\b',
+      score: 0.93,
+    },
+    {
+      name: 'uk_gp_or_health_practice_name',
+      regex: '\\b[A-Z][A-Za-z]+(?:\\s+[A-Z][A-Za-z]+){0,5}\\s+(?:GP\\s+)?Practice\\b',
+      score: 0.94,
+    },
+    {
+      name: 'uk_foundation_trust_name',
+      regex:
+        '\\b[A-Z][A-Za-z]+(?:\\s+[A-Z][A-Za-z]+){0,6}\\s+(?:NHS\\s+)?(?:Foundation\\s+Trust|Trust)\\b',
+      score: 0.94,
+    },
+  ],
+  context: ['hospital', 'medical centre', 'medical center', 'foundation trust', 'nhs trust'],
 };
 
 const ukPassportRecognizer: CustomRecognizer = {
@@ -873,9 +968,13 @@ export const GDPR_UK_CUSTOM_RECOGNIZERS: CustomRecognizer[] = [
   ukNhsNumberRecognizer,
   ukNinoRecognizer,
   ukPostcodeRecognizer,
+  ukPhoneNumberRecognizer,
+  occupationRecognizerGdprUk,
+  ukGpPracticeCodeRecognizer,
   ukPassportRecognizer,
   ukDriverLicenceRecognizer,
   ukSortCodeRecognizerGdprUk,
+  ukHealthcareOrganizationRecognizer,
   geneticDataRecognizer,
   tradeUnionRecognizer,
 ];
