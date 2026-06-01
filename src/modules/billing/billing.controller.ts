@@ -130,4 +130,15 @@ export default class BillingController {
   async getPaymentHistory(@CurrentUser() user: AuthenticatedUser): Promise<PaymentHistory[]> {
     return this.billingService.getPaymentHistoryByUserId(user.uuid);
   }
+
+  @Get('history/:invoiceId/download')
+  @ApiOperation({ summary: 'Get the Stripe Invoice PDF download URL' })
+  async downloadInvoice(
+    @Param('invoiceId') invoiceId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    const pdfUrl = await this.billingService.getInvoicePdfUrl(user.uuid, invoiceId);
+
+    return { url: pdfUrl };
+  }
 }

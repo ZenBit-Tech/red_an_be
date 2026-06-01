@@ -749,6 +749,19 @@ export default class BillingService {
       }
     }
 
+    if (!userId && invoice.customer) {
+      const customerId =
+        typeof invoice.customer === 'string' ? invoice.customer : invoice.customer.id;
+      try {
+        const user = await this.userRepository.findOne({ where: { stripeCustomerId: customerId } });
+        if (user) {
+          userId = user.uuid;
+        }
+      } catch (error: unknown) {
+        this.logger.error(`Failed to find user by stripeCustomerId: ${invoice.customer}`);
+      }
+    }
+
     if (!userId) {
       this.logger.error(
         `No userId found for invoice ${invoice.id}. Skipping PaymentHistory record.`,
@@ -777,5 +790,29 @@ export default class BillingService {
       where: { userId },
       order: { createdAt: 'DESC' },
     });
+  }
+
+  public async getInvoicePdfUrl(userId: string, invoiceId: string): Promise<string> {
+    const payment = await this.paymentHistoryRepository.findOne({
+      where: { id: invoiceId, userId },
+    });
+
+    if (!payment) {
+      throw new NotFoundException('Invoice not found or access denied');
+    }
+
+    try {
+      const stripeInvoice = await this.stripe.invoices.retrieve(payment.stripeInvoiceId);
+
+      if (!stripeInvoice.invoice_pdf) {
+        throw new NotFoundException('PDF URL for this invoice is missing on Stripe side');
+      }
+
+      return stripeInvoice.invoice_pdf;
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Failed to fetch invoice PDF from Stripe: ${message}`);
+      throw new InternalServerErrorException('Failed to retrieve invoice download link');
+    }
   }
 }

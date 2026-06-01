@@ -1,6 +1,5 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-// Переконайся, що назва класу збігається з цифрами у назві файлу
 export class CreatePaymentHistoryTable1779827000000 implements MigrationInterface {
   name = 'CreatePaymentHistoryTable1779827000000';
 

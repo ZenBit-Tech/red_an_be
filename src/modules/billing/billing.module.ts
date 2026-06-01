@@ -15,9 +15,7 @@ import BillingService from './billing.service';
 @Module({
   imports: [
     TypeOrmModule.forFeature([User, Subscription, StripeWebhookEvent, DailyUsage, PaymentHistory]),
-
     AuthModule,
-    ,
   ],
   controllers: [BillingController, WebhookController],
   providers: [BillingService],
