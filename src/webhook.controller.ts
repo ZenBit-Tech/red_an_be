@@ -65,16 +65,22 @@ export default class WebhookController {
         break;
       }
 
+      case 'invoice.paid': {
+        const invoice = event.data.object as Stripe.Invoice;
+        await this.billingService.createPaymentHistoryFromInvoice(invoice, 'paid');
+        break;
+      }
+
       case STRIPE_EVENTS.INVOICE_PAYMENT_FAILED: {
         const invoice = event.data.object as Stripe.Invoice;
         this.logger.warn(`Payment failed for invoice ${invoice.id}`);
+        await this.billingService.createPaymentHistoryFromInvoice(invoice, 'failed');
         break;
       }
 
       default:
         this.logger.log(`Unhandled Stripe event: ${event.type}`);
     }
-
     return { received: true };
   }
 }

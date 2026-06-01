@@ -13,6 +13,7 @@ import Stripe from 'stripe';
 
 import DailyUsage from '@common/db/entities/daily-usage.entity';
 import Subscription, { SubscriptionStatus } from '@common/db/entities/subscription.entity';
+import PaymentHistory from '@common/db/entities/payment-history.entity';
 import StripeWebhookEvent from '@common/db/entities/stripe-webhook-event.entity';
 import User from '@common/db/entities/user.entity';
 import isMySqlError from '@common/utils/isMySqlError';
@@ -74,6 +75,8 @@ export default class BillingService {
     private readonly stripeWebhookEventRepository: Repository<StripeWebhookEvent>,
     @InjectRepository(DailyUsage)
     private readonly dailyUsageRepository: Repository<DailyUsage>,
+    @InjectRepository(PaymentHistory)
+    private readonly paymentHistoryRepository: Repository<PaymentHistory>,
   ) {
     const secretKey = this.configService.getOrThrow<string>(BILLING_ENV.STRIPE_SECRET_KEY);
     this.webhookSecret = this.configService.getOrThrow<string>(BILLING_ENV.STRIPE_WEBHOOK_SECRET);
@@ -660,6 +663,156 @@ export default class BillingService {
         month: '2-digit',
         day: '2-digit',
       }).format(new Date());
+    }
+  }
+
+  public async getSubscriptionByUserId(userId: string): Promise<Subscription> {
+    try {
+      const subscription = await this.subscriptionRepository.findOne({
+        where: { userId },
+        order: { updatedAt: 'DESC' },
+      });
+      if (!subscription) {
+        return {
+          id: '',
+          userId,
+          stripeSubscriptionId: null,
+          stripeCustomerId: '',
+          stripePriceId: 'free_plan',
+          status: 'unpaid',
+          currentPeriodEnd: null,
+          cancelAtPeriodEnd: false,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        } as Subscription;
+      }
+
+      return subscription;
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Failed to get subscription for user ${userId}: ${message}`);
+      throw new InternalServerErrorException('Failed to retrieve subscription details');
+    }
+  }
+
+  public async cancelSubscription(userId: string) {
+    const subscription = await this.subscriptionRepository.findOne({
+      where: { userId },
+      order: { updatedAt: 'DESC' },
+    });
+
+    if (!subscription?.stripeSubscriptionId) {
+      throw new NotFoundException('Subscription not found');
+    }
+
+    const canceledSubscription = await this.stripe.subscriptions.cancel(
+      subscription.stripeSubscriptionId,
+    );
+
+    return {
+      success: true,
+      status: canceledSubscription.status,
+    };
+  }
+
+  public async createPaymentHistoryFromInvoice(
+    invoice: Stripe.Invoice,
+    status: 'paid' | 'failed',
+  ): Promise<void> {
+    let userId = invoice.metadata?.userId;
+    let subscriptionId: string | null = null;
+
+    const rawInvoice = invoice as unknown as { subscription?: string | { id: string } | null };
+
+    if (typeof rawInvoice.subscription === 'string') {
+      subscriptionId = rawInvoice.subscription;
+    } else if (rawInvoice.subscription && typeof rawInvoice.subscription === 'object') {
+      subscriptionId = rawInvoice.subscription.id;
+    }
+
+    if (!subscriptionId && invoice.lines?.data?.[0]?.subscription) {
+      const lineSub = invoice.lines.data[0].subscription;
+      if (typeof lineSub === 'string') {
+        subscriptionId = lineSub;
+      } else if (lineSub && typeof lineSub === 'object') {
+        subscriptionId = lineSub.id;
+      }
+    }
+
+    if (!userId && subscriptionId) {
+      try {
+        const subscription = await this.stripe.subscriptions.retrieve(subscriptionId);
+        userId = subscription.metadata?.userId;
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        this.logger.error(`Failed to fetch subscription details from Stripe: ${errorMessage}`);
+      }
+    }
+
+    if (!userId && invoice.customer) {
+      const customerId =
+        typeof invoice.customer === 'string' ? invoice.customer : invoice.customer.id;
+      try {
+        const user = await this.userRepository.findOne({ where: { stripeCustomerId: customerId } });
+        if (user) {
+          userId = user.uuid;
+        }
+      } catch (error: unknown) {
+        this.logger.error(`Failed to find user by stripeCustomerId: ${invoice.customer}`);
+      }
+    }
+
+    if (!userId) {
+      this.logger.error(
+        `No userId found for invoice ${invoice.id}. Skipping PaymentHistory record.`,
+      );
+      return;
+    }
+
+    await this.paymentHistoryRepository.upsert(
+      {
+        userId,
+        stripeInvoiceId: invoice.id,
+        invoiceNumber: invoice.number ?? null,
+        amount: invoice.amount_paid || invoice.amount_due,
+        status,
+      },
+      ['stripeInvoiceId'],
+    );
+
+    this.logger.log(
+      `Payment history record created/updated for invoice ${invoice.id} (status: ${status}, user: ${userId})`,
+    );
+  }
+
+  public async getPaymentHistoryByUserId(userId: string): Promise<PaymentHistory[]> {
+    return this.paymentHistoryRepository.find({
+      where: { userId },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  public async getInvoicePdfUrl(userId: string, invoiceId: string): Promise<string> {
+    const payment = await this.paymentHistoryRepository.findOne({
+      where: { id: invoiceId, userId },
+    });
+
+    if (!payment) {
+      throw new NotFoundException('Invoice not found or access denied');
+    }
+
+    try {
+      const stripeInvoice = await this.stripe.invoices.retrieve(payment.stripeInvoiceId);
+
+      if (!stripeInvoice.invoice_pdf) {
+        throw new NotFoundException('PDF URL for this invoice is missing on Stripe side');
+      }
+
+      return stripeInvoice.invoice_pdf;
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Failed to fetch invoice PDF from Stripe: ${message}`);
+      throw new InternalServerErrorException('Failed to retrieve invoice download link');
     }
   }
 }

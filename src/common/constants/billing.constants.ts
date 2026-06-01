@@ -12,6 +12,7 @@ export const STRIPE_EVENTS = {
   SUBSCRIPTION_UPDATED: 'customer.subscription.updated',
   SUBSCRIPTION_DELETED: 'customer.subscription.deleted',
   INVOICE_PAYMENT_FAILED: 'invoice.payment_failed',
+  INVOICE_PAID: 'invoice.paid',
 } as const;
 
 export const BILLING_PLAN_TIER = {

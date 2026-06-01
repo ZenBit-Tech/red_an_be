@@ -7,6 +7,7 @@ import DetectedEntity from './entities/detected-entity.entity';
 import Subscription from './entities/subscription.entity';
 import StripeWebhookEvent from './entities/stripe-webhook-event.entity';
 import DailyUsage from './entities/daily-usage.entity';
+import PaymentHistory from './entities/payment-history.entity';
 import { NODE_ENV } from '../constants';
 
 config();
@@ -39,7 +40,15 @@ export const dataSourceOptions: DataSourceOptions = {
         password: configService.getOrThrow<string>('DB_PASSWORD'),
         database: configService.getOrThrow<string>('DB_NAME'),
       }),
-  entities: [User, DeIdJob, DetectedEntity, Subscription, StripeWebhookEvent, DailyUsage],
+  entities: [
+    User,
+    DeIdJob,
+    DetectedEntity,
+    Subscription,
+    StripeWebhookEvent,
+    DailyUsage,
+    PaymentHistory,
+  ],
 };
 
 const dataSource = new DataSource(dataSourceOptions);

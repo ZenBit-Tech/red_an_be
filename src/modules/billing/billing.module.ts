@@ -5,6 +5,7 @@ import Subscription from '@common/db/entities/subscription.entity';
 import StripeWebhookEvent from '@common/db/entities/stripe-webhook-event.entity';
 import User from '@common/db/entities/user.entity';
 import DailyUsage from '@common/db/entities/daily-usage.entity';
+import PaymentHistory from '@common/db/entities/payment-history.entity';
 
 import AuthModule from '../auth/auth.module';
 import BillingController from './billing.controller';
@@ -13,7 +14,7 @@ import BillingService from './billing.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User, Subscription, StripeWebhookEvent, DailyUsage]),
+    TypeOrmModule.forFeature([User, Subscription, StripeWebhookEvent, DailyUsage, PaymentHistory]),
     AuthModule,
   ],
   controllers: [BillingController, WebhookController],
