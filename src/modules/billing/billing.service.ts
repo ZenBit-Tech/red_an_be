@@ -720,8 +720,18 @@ export default class BillingService {
     status: 'paid' | 'failed',
   ): Promise<void> {
     let userId = invoice.metadata?.userId;
-    let subscriptionId: string | null = null;
 
+    if (!userId && invoice.lines?.data) {
+      const lineWithUserId = invoice.lines.data.find(
+        (line) =>
+          line.metadata && 'userId' in line.metadata && typeof line.metadata.userId === 'string',
+      );
+      if (lineWithUserId?.metadata?.userId) {
+        userId = lineWithUserId.metadata.userId;
+      }
+    }
+
+    let subscriptionId: string | null = null;
     const rawInvoice = invoice as unknown as { subscription?: string | { id: string } | null };
 
     if (typeof rawInvoice.subscription === 'string') {
