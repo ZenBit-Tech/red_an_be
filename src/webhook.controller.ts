@@ -65,7 +65,14 @@ export default class WebhookController {
         break;
       }
 
-      case 'invoice.paid': {
+      case 'invoice.finalized': {
+        const invoice = event.data.object as Stripe.Invoice;
+        await this.billingService.createPaymentHistoryFromInvoice(invoice, 'paid');
+        break;
+      }
+
+      case 'invoice.paid':
+      case 'invoice.payment_succeeded': {
         const invoice = event.data.object as Stripe.Invoice;
         await this.billingService.createPaymentHistoryFromInvoice(invoice, 'paid');
         break;
