@@ -25,10 +25,10 @@ jobs:
         env:
           HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
         run: |
-          heroku container:push web --app ${{ secrets.HEROKU_APP_NAME }}
+          heroku container:push web --app deiden-be
 
       - name: Release Docker Image
         env:
           HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
         run: |
-          heroku container:release web --app ${{ secrets.HEROKU_APP_NAME }}
+          heroku container:release web --app deiden-be
