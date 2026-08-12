@@ -1765,6 +1765,13 @@ export default class DeIdService {
       .sort((first, second) => second.count - first.count || first.type.localeCompare(second.type));
   }
 
+  /**
+   * Nudges Presidio awake ahead of the first real request. Returns immediately.
+   */
+  public warmUpPresidio(): void {
+    this.presidioClient.warmUp();
+  }
+
   public async getRemoteNlpHealth(): Promise<RemoteNlpHealthResult> {
     if (!this.remoteNlpClient.isConfigured()) {
       return {
