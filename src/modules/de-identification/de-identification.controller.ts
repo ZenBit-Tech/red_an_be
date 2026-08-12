@@ -2,6 +2,8 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   Patch,
   Post,
@@ -114,6 +116,13 @@ export default class DeIdController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<RegenerateSyntheticTableResponseDto> {
     return this.deIdService.regenerateSyntheticTable(generationId, dto, user.uuid);
+  }
+
+  @Get('warmup')
+  @ApiOperation({ summary: 'Wake the Presidio analyzer ahead of the first request' })
+  @HttpCode(HttpStatus.NO_CONTENT)
+  warmUp(): void {
+    this.deIdService.warmUpPresidio();
   }
 
   @Get('remote-nlp/health')
